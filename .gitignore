@@ -1,0 +1,15 @@
+# Terraform specific
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+.env
+
+# Kept ignored on purpose even though the current backend.*.conf files contain
+# no secrets: this is a fail-safe against a future .conf file that does.
+*.conf
+
+# Python specific
+__pycache__/
+*.py[cod]
+venv/
