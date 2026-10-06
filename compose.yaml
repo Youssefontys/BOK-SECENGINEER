@@ -1,0 +1,62 @@
+# Lokale ontwikkelomgeving: app plus database in één commando.
+# Niet bedoeld voor Azure, daar draait de image in App Service tegen een
+# Azure Database for PostgreSQL Flexible Server.
+#
+# Waarden komen uit .env (staat in .gitignore, zie .env.example voor de
+# benodigde variabelen). Zo staat er geen wachtwoord in dit bestand en dus
+# ook niet in git.
+
+services:
+  db:
+    # 17 en niet 18, om lokaal te matchen met wat Azure Flexible Server
+    # aanbiedt. Verifieer die versielijst in de portal voor je dit in
+    # Terraform vastlegt.
+    image: postgres:17
+    environment:
+      POSTGRES_DB: notities
+      POSTGRES_USER: notities_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?zet POSTGRES_PASSWORD in .env}
+    # Alleen op localhost luisteren, niet op alle interfaces: de database
+    # hoort niet bereikbaar te zijn voor andere machines in je netwerk.
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - dbdata:/var/lib/postgresql/data
+      # Alles in deze map draait automatisch bij de ALLEREERSTE start van een
+      # leeg datavolume. Pas je schema.sql later aan, dan gebeurt er niets
+      # meer: verwijder dan eerst het volume (docker compose down -v).
+      - ./app/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U notities_app -d notities"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build: ./app
+    depends_on:
+      # Wachten tot Postgres echt klaar is, niet alleen tot de container
+      # bestaat. Anders krijg je bij de eerste start connection refused.
+      db:
+        condition: service_healthy
+    environment:
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:?zet FLASK_SECRET_KEY in .env}
+      # Hostname 'db' is de servicenaam hierboven; compose regelt de DNS.
+      DATABASE_URL: postgresql://notities_app:${POSTGRES_PASSWORD}@db:5432/notities
+      # Lokaal draait dit op http, dus de Secure-vlag op de sessiecookie moet
+      # uit. In Azure staat deze op true.
+      COOKIE_SECURE: "false"
+    ports:
+      - "127.0.0.1:5000:5000"
+    volumes:
+      # Broncode vanaf de host, zodat een wijziging direct zichtbaar is
+      # zonder rebuild.
+      - ./app:/app
+    # Dev-server met reload, in plaats van de gunicorn uit de Dockerfile.
+    # host 0.0.0.0 is nodig om de app buiten de container te kunnen bereiken.
+    # --debug zet ook de Werkzeug-debugger aan, en die kan code uitvoeren:
+    # dit hoort uitsluitend lokaal, nooit in Azure.
+    command: flask --app app run --host 0.0.0.0 --port 5000 --debug
+
+volumes:
+  dbdata:
