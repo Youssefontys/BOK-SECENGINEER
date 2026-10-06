@@ -1,0 +1,465 @@
+/* Eén stylesheet, geen framework en geen CDN. Dat houdt het aantal
+   dependencies laag en maakt een strikte Content-Security-Policy mogelijk:
+   geen externe bronnen, geen inline styles. */
+
+:root {
+  --bg: #080c12;
+  --bg-2: #0d141d;
+  --surface: #111a24;
+  --text: #dbe7f0;
+  --muted: #7c93a8;
+  --border: #1d2b3a;
+  --accent: #35e0c0;
+  --accent-2: #4ea3ff;
+  --danger: #ff6b6b;
+  --radius: 10px;
+
+  /* Worden door cyber.js gevuld met de muispositie (0..1). De 0.5 hier is
+     de neutrale stand als er nog geen beweging is geweest. */
+  --mx: 0.5;
+  --my: 0.5;
+}
+
+* { box-sizing: border-box; }
+
+html, body { min-height: 100%; }
+
+body {
+  margin: 0;
+  padding: 3rem 1rem 17rem;
+  background-color: var(--bg);
+  color: var(--text);
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  position: relative;
+  overflow-x: hidden;
+}
+
+/* Twee lagen achtergrond: een raster dat meebeweegt met de muis, en een
+   gloed die de cursor volgt. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -10%;
+  z-index: -2;
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size: 46px 46px;
+  opacity: 0.5;
+  transform: translate3d(calc((var(--mx) - 0.5) * -26px),
+                         calc((var(--my) - 0.5) * -26px), 0);
+  transition: transform 160ms ease-out;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(42rem circle at calc(var(--mx) * 100%) calc(var(--my) * 100%),
+      rgba(53, 224, 192, 0.10), transparent 60%),
+    linear-gradient(180deg, transparent, var(--bg-2));
+  transition: background 120ms linear;
+}
+
+/* Inlog- en registratiepagina's: inhoud verticaal gecentreerd in de ruimte
+   boven de scene, in plaats van bovenaan geplakt met een gat eronder. */
+body.auth {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  /* align-items en niet "margin: 0 auto" op main: een automatische marge in
+     de dwarsrichting laat een flex-item naar zijn inhoud krimpen, waardoor
+     het formulier veel te smal wordt. */
+  align-items: center;
+  min-height: 100vh;
+  padding-top: 2rem;
+}
+
+body.auth main { width: 100%; }
+
+/* Na het inloggen een rustiger beeld: andere accentkleur, stil raster en
+   geen gloed die de muis volgt. Je bent binnen, dus de pagina hoeft niet
+   meer te imponeren. */
+body.app {
+  --accent: #48dd7a;
+  --accent-2: #7cc6ff;
+  padding-bottom: 4rem;
+}
+
+body.app::before {
+  opacity: 0.22;
+  transform: none;
+}
+
+body.app::after {
+  background: linear-gradient(180deg, transparent, var(--bg-2));
+}
+
+main {
+  position: relative;
+  z-index: 1;
+  max-width: 34rem;
+  margin: 0 auto;
+}
+
+header.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+h1 {
+  margin: 0 0 1.25rem;
+  font-size: 1.45rem;
+  letter-spacing: -0.01em;
+}
+
+h1::before {
+  content: "// ";
+  color: var(--accent);
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+h2 { margin: 0 0 0.35rem; font-size: 1.02rem; }
+
+.card {
+  background: linear-gradient(180deg, var(--surface), #0f1721);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.35rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 0 0 1px rgba(53, 224, 192, 0.04), 0 18px 40px -28px #000;
+}
+
+label {
+  display: block;
+  margin-bottom: 0.9rem;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+input, textarea {
+  display: block;
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.65rem 0.75rem;
+  background: #080e15;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+input:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(53, 224, 192, 0.16);
+}
+
+textarea { resize: vertical; min-height: 6rem; }
+
+button {
+  padding: 0.6rem 1.15rem;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: rgba(53, 224, 192, 0.12);
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms, box-shadow 120ms;
+}
+
+button:hover {
+  background: rgba(53, 224, 192, 0.22);
+  box-shadow: 0 0 18px -4px rgba(53, 224, 192, 0.5);
+}
+
+button.secondary {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--muted);
+}
+
+button.secondary:hover { color: var(--text); box-shadow: none; }
+
+.error {
+  margin: 0 0 1rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--danger);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: rgba(255, 107, 107, 0.08);
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+.hint, small {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.note-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.8rem;
+}
+
+.note-body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.qr {
+  width: 200px;
+  height: 200px;
+  padding: 0.5rem;
+  background: #fff;
+  border-radius: 8px;
+}
+
+code {
+  padding: 0.15rem 0.4rem;
+  background: #080e15;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--accent);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+
+a { color: var(--accent-2); }
+
+.empty {
+  padding: 2rem 1rem;
+  text-align: center;
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+/* ---------------------------------------------------------------- scene */
+
+.scene {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 16rem;
+  z-index: 0;
+  /* Nooit klikken afpakken van het formulier. */
+  pointer-events: none;
+  transform: translate3d(calc((var(--mx) - 0.5) * 18px), 0, 0);
+  transition: transform 220ms ease-out;
+}
+
+.scene svg { width: 100%; height: 100%; display: block; }
+
+.cables path {
+  stroke-dasharray: 7 11;
+  animation: flow 2.6s linear infinite;
+}
+
+@keyframes flow { to { stroke-dashoffset: -36; } }
+
+.rack rect { fill: #0e1721; stroke: var(--border); }
+.led circle { fill: var(--accent); animation: blink 2.4s steps(2, end) infinite; }
+.led circle:nth-child(2) { animation-delay: 0.5s; }
+.led circle:nth-child(3) { animation-delay: 1.1s; }
+.led circle:nth-child(4) { animation-delay: 1.6s; }
+
+@keyframes blink { 50% { opacity: 0.25; } }
+
+.monitor rect:first-child { fill: #0e1721; stroke: var(--border); }
+.codelines rect { fill: var(--accent); opacity: 0.55; animation: scan 3.4s ease-in-out infinite; }
+.codelines rect:nth-child(2) { animation-delay: 0.4s; }
+.codelines rect:nth-child(3) { animation-delay: 0.8s; }
+.codelines rect:nth-child(4) { animation-delay: 1.2s; }
+.codelines rect:nth-child(5) { animation-delay: 1.6s; }
+
+@keyframes scan {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 0.8; }
+}
+
+/* De blik volgt de cursor. transform-box zorgt dat de verplaatsing wordt
+   gerekend vanaf de groep zelf en niet vanaf de oorsprong van de hele SVG. */
+.gaze {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: translate(calc((var(--mx) - 0.5) * 13px),
+                       calc((var(--my) - 0.5) * 7px));
+  transition: transform 90ms linear;
+}
+
+/* Het hoofd schuift een fractie mee, zodat het volgen niet alleen in de
+   ogen zit maar de hele figuur je lijkt op te merken. */
+.hacker .hood,
+.hacker .face,
+.hacker .brim {
+  transform-box: fill-box;
+  transform-origin: center bottom;
+  transform: translateX(calc((var(--mx) - 0.5) * 5px));
+  transition: transform 140ms ease-out;
+}
+
+.hacker { animation: bob 5s ease-in-out infinite; }
+.hacker .shoulders, .hacker .hood { fill: #0a1017; stroke: var(--border); }
+.hacker .face { fill: #04070a; }
+.hacker .brim { fill: #0d151e; }
+.hacker .keyboard { fill: #0e1721; stroke: var(--border); }
+.hacker .eyes ellipse { fill: var(--accent); animation: look 6s ease-in-out infinite; }
+
+@keyframes bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+@keyframes look {
+  0%, 92%, 100% { opacity: 0.85; }
+  94% { opacity: 0.1; }
+}
+
+.ticker {
+  position: absolute;
+  bottom: 0.65rem;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.76rem;
+  color: var(--muted);
+  white-space: nowrap;
+  /* Leesbaar houden waar de tekst over het toetsenbord van de figuur valt. */
+  text-shadow: 0 0 10px var(--bg), 0 0 5px var(--bg), 0 0 2px var(--bg);
+}
+
+.ticker .prompt { color: var(--accent); }
+
+/* Reactie op een klik buiten de invoervelden. */
+body.alerted .hacker .eyes ellipse {
+  fill: var(--danger);
+  animation: none;
+  opacity: 1;
+}
+
+body.alerted .scene { filter: drop-shadow(0 0 14px rgba(255, 107, 107, 0.35)); }
+body.alerted .ticker { color: var(--danger); }
+
+.ripple {
+  position: fixed;
+  left: var(--x);
+  top: var(--y);
+  width: 10px;
+  height: 10px;
+  margin: -5px 0 0 -5px;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 2;
+  animation: pulse 620ms ease-out forwards;
+}
+
+@keyframes pulse {
+  to { transform: scale(9); opacity: 0; }
+}
+
+/* ------------------------------------------------- na inloggen (app-modus) */
+
+.granted {
+  margin: 0 0 1.25rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid var(--accent);
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: rgba(72, 221, 122, 0.08);
+  color: var(--accent);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  animation: granted-in 420ms ease-out, granted-out 900ms ease-in 3.4s forwards;
+}
+
+.granted .prompt { opacity: 0.7; }
+
+@keyframes granted-in {
+  from { opacity: 0; transform: translateY(-6px); }
+}
+
+@keyframes granted-out {
+  to { opacity: 0; transform: translateY(-6px); visibility: hidden; }
+}
+
+/* Het aanmaakformulier is inklapbaar, zodat je bij veel notities niet elke
+   keer langs een uitgeklapt formulier scrollt. Staat open zolang er nog
+   geen notities zijn. */
+.composer summary {
+  cursor: pointer;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.composer[open] summary { margin-bottom: 1rem; }
+
+.count {
+  margin: 1.5rem 0 0.75rem;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+/* Twee kolommen zodra er ruimte voor is: korte notities vullen anders een
+   hele regel met lege ruimte. */
+.notes-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+  /* Kaarten houden hun eigen hoogte in plaats van mee te rekken met de
+     langste notitie op dezelfde rij. */
+  align-items: start;
+}
+
+.notes-grid .card { margin-bottom: 0; }
+
+.notes-grid .empty { grid-column: 1 / -1; }
+
+@media (min-width: 46rem) {
+  body.app main { max-width: 52rem; }
+  .notes-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Wie beweging heeft uitgezet in het besturingssysteem krijgt een stil
+   uiterlijk: zelfde vormgeving, geen animatie en geen parallax. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  body::before, .scene { transform: none; }
+}
+
+@media (max-width: 600px) {
+  body { padding-bottom: 12rem; }
+  .scene { height: 11rem; }
+  .ticker { font-size: 0.68rem; }
+}

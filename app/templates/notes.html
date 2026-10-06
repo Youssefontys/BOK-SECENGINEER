@@ -1,36 +1,60 @@
-<!doctype html>
-<html lang="nl">
-<head><meta charset="utf-8"><title>Mijn notities</title></head>
-<body>
-  <form method="post" action="{{ url_for('logout') }}" style="float:right">
-    <button type="submit">Uitloggen</button>
-  </form>
+{% extends "base.html" %}
+{% block title %}Mijn notities{% endblock %}
 
-  <h1>Mijn notities</h1>
-  {% if error %}<p style="color:#b00">{{ error }}</p>{% endif %}
+{% block content %}
+  {# Wordt alleen direct na een geslaagde login meegegeven, en daarna niet
+     meer: de vlag wordt serverzijdig uit de sessie gehaald. #}
+  {% if just_logged_in %}
+    <p class="granted"><span class="prompt">&gt;</span> access granted</p>
+  {% endif %}
 
-  <form method="post">
-    <label>Titel <input name="title" maxlength="120" required></label><br>
-    <label>Notitie<br><textarea name="body" rows="4" cols="50" maxlength="4000" required></textarea></label><br>
-    <button type="submit">Opslaan</button>
-  </form>
+  <header class="bar">
+    <h1>Mijn notities</h1>
+    <form method="post" action="{{ url_for('logout') }}">
+      <button type="submit" class="secondary">Uitloggen</button>
+    </form>
+  </header>
 
-  <hr>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  {# Open als er nog niets is, en open bij een foutmelding: anders verwijst
+     de melding naar een formulier dat dichtgeklapt is, en blokkeren de
+     verborgen verplichte velden bovendien het versturen. #}
+  <details class="card composer"{% if not notes or error %} open{% endif %}>
+    <summary>Nieuwe notitie</summary>
+    <form method="post">
+      <label>Titel
+        {# Bij een fout de ingevulde waarden teruggeven, zodat een lange
+           notitie niet verloren gaat door een te lange titel. #}
+        <input name="title" maxlength="120" required value="{{ form_title or '' }}">
+      </label>
+      <label>Notitie
+        <textarea name="body" maxlength="4000" required>{{ form_body or '' }}</textarea>
+      </label>
+      <button type="submit">Opslaan</button>
+    </form>
+  </details>
+
+  <p class="count">{{ notes|length }} {{ "notitie" if notes|length == 1 else "notities" }}</p>
 
   {# Jinja escapet {{ ... }} standaard, dus een notitie met <script> erin
-     wordt als tekst weergegeven en niet uitgevoerd. Gebruik hier nooit
-     |safe, dat zet precies die bescherming uit. #}
-  {% for note in notes %}
-    <article>
-      <h2>{{ note[1] }}</h2>
-      <p>{{ note[2] }}</p>
-      <p><small>{{ note[3] }}</small></p>
-      <form method="post" action="{{ url_for('delete_note', note_id=note[0]) }}">
-        <button type="submit">Verwijderen</button>
-      </form>
-    </article>
-  {% else %}
-    <p>Nog geen notities.</p>
-  {% endfor %}
-</body>
-</html>
+     verschijnt als tekst en wordt niet uitgevoerd. Gebruik hier nooit
+     |safe: dat zet precies die bescherming uit. De CSP is de tweede laag
+     eronder, zie security_headers() in app.py. #}
+  <div class="notes-grid">
+    {% for note in notes %}
+      <article class="card note">
+        <h2>{{ note[1] }}</h2>
+        <p class="note-body">{{ note[2] }}</p>
+        <div class="note-meta">
+          <small>{{ note[3].strftime('%d-%m-%Y %H:%M') }}</small>
+          <form method="post" action="{{ url_for('delete_note', note_id=note[0]) }}">
+            <button type="submit" class="secondary">Verwijderen</button>
+          </form>
+        </div>
+      </article>
+    {% else %}
+      <p class="empty">Nog geen notities.</p>
+    {% endfor %}
+  </div>
+{% endblock %}

@@ -1,11 +1,27 @@
-<!doctype html>
-<html lang="nl">
-<head><meta charset="utf-8"><title>Tweede factor instellen</title></head>
-<body>
+{% extends "base.html" %}
+{% block title %}Tweede factor instellen{% endblock %}
+{% block body_class %}auth{% endblock %}
+{% block scene %}{% include "_scene.html" %}{% endblock %}
+
+{% block content %}
   <h1>Tweede factor instellen</h1>
-  <p>Zet deze sleutel in je authenticator-app. Hij wordt hierna niet meer getoond.</p>
-  <p><code>{{ secret }}</code></p>
-  <p><small>otpauth-URI: <code>{{ uri }}</code></small></p>
-  <p><a href="{{ url_for('login') }}">Doorgaan naar inloggen</a></p>
-</body>
-</html>
+
+  <div class="card">
+    <p>Scan deze code met je authenticator-app.</p>
+
+    {# De QR-code is door de applicatie zelf gegenereerd en meegegeven als
+       data-URI. Geen |safe nodig: dit staat in een attribuut, dus Jinja
+       escapet het gewoon mee. #}
+    <img class="qr" src="{{ qr }}" alt="QR-code voor de TOTP-sleutel" width="200" height="200">
+
+    <p class="hint">Lukt scannen niet, voer de sleutel dan handmatig in:</p>
+    <p><code>{{ secret }}</code></p>
+
+    <p class="hint">
+      Deze sleutel wordt hierna niet meer getoond. Hij hoort in je
+      authenticator-app, niet in een tekstbestand.
+    </p>
+  </div>
+
+  <p class="hint"><a href="{{ url_for('login') }}">Doorgaan naar inloggen</a></p>
+{% endblock %}

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Notities{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+{# Pagina's kiezen hun eigen modus: "auth" krijgt het volledige thema met de
+   figuur, "app" de rustigere variant na inloggen. #}
+<body class="{% block body_class %}app{% endblock %}">
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  {# Alleen de inlog- en registratiepagina's nemen de scene op. #}
+  {% block scene %}{% endblock %}
+
+  {# Apart bestand, geen inline script: zo blijft de CSP op script-src 'self'
+     zonder 'unsafe-inline'. defer, zodat de pagina niet wacht op dit
+     decoratieve stukje. #}
+  <script src="{{ url_for('static', filename='cyber.js') }}" defer></script>
+</body>
+</html>
