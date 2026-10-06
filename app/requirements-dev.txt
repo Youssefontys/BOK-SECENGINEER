@@ -1,0 +1,5 @@
+# Alleen voor het draaien van de tests, bewust los van requirements.txt.
+# Zo blijven testafhankelijkheden buiten de image die naar Azure gaat:
+# minder pakketten in productie betekent minder aanvalsoppervlak en minder
+# CVE's om bij te houden.
+pytest

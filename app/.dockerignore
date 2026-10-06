@@ -1,0 +1,10 @@
+# Houdt de build-context en daarmee de image klein, en voorkomt dat er
+# per ongeluk iets in de image belandt dat er niet hoort.
+tests/
+requirements-dev.txt
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.conf
