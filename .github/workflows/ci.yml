@@ -1,0 +1,58 @@
+name: CI
+
+# Bewust nog kaal: bouwen, testen, en controleren dat de app opstart.
+# Securityscans (IaC, SAST, dependencies, image, SBoM) komen hierna als
+# aparte stappen erbij, zodat per toevoeging te zien is wat hij oplevert.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wegwerpwaarden voor de testomgeving
+        # Dezelfde variabelen als lokaal, maar per run opnieuw gegenereerd.
+        # Er staat dus geen enkel wachtwoord in de repo of in GitHub Secrets
+        # voor deze stap; hij praat alleen met containers op de runner zelf.
+        run: |
+          {
+            echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)"
+            echo "APP_DB_PASSWORD=$(openssl rand -hex 16)"
+            echo "FLASK_SECRET_KEY=$(openssl rand -hex 32)"
+            echo "DB_ENCRYPTION_KEY=$(openssl rand -hex 32)"
+          } > .env
+
+      - name: Image bouwen en stack starten
+        run: docker compose up -d --build
+
+      - name: Wachten tot de app antwoordt
+        run: |
+          for poging in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5000/login > /dev/null; then
+              echo "App antwoordt na poging $poging."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "App antwoordde niet binnen 60 seconden."
+          exit 1
+
+      - name: Testafhankelijkheden installeren
+        run: docker compose exec -T web pip install --no-cache-dir -r requirements-dev.txt
+
+      - name: Tests draaien
+        run: docker compose exec -T web python -m pytest tests -v
+
+      - name: Logs tonen bij een mislukte run
+        if: failure()
+        run: docker compose logs
+
+      - name: Opruimen
+        if: always()
+        run: docker compose down -v
