@@ -1,16 +1,10 @@
 # Lokale ontwikkelomgeving: app plus database in één commando.
-# Niet bedoeld voor Azure, daar draait de image in App Service tegen een
-# Azure Database for PostgreSQL Flexible Server.
-#
-# Waarden komen uit .env (staat in .gitignore, zie .env.example voor de
-# benodigde variabelen). Zo staat er geen wachtwoord in dit bestand en dus
-# ook niet in git.
+# Niet bedoeld voor Azure, daar draait de image in App Service met een Azure Database for PostgreSQL.
 
 services:
-  db:
+  database:
     # 17 en niet 18, om lokaal te matchen met wat Azure Flexible Server
-    # aanbiedt. Verifieer die versielijst in de portal voor je dit in
-    # Terraform vastlegt.
+    # aanbiedt. VERIFIEREN. 
     image: postgres:17
     environment:
       POSTGRES_DB: notities
@@ -40,12 +34,12 @@ services:
       timeout: 3s
       retries: 10
 
-  web:
+  application:
     build: ./app
     depends_on:
       # Wachten tot Postgres echt klaar is, niet alleen tot de container
       # bestaat. Anders krijg je bij de eerste start connection refused.
-      db:
+      database:
         condition: service_healthy
     environment:
       FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:?zet FLASK_SECRET_KEY in .env}
