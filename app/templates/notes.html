@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="nl">
+<head><meta charset="utf-8"><title>Mijn notities</title></head>
+<body>
+  <form method="post" action="{{ url_for('logout') }}" style="float:right">
+    <button type="submit">Uitloggen</button>
+  </form>
+
+  <h1>Mijn notities</h1>
+  {% if error %}<p style="color:#b00">{{ error }}</p>{% endif %}
+
+  <form method="post">
+    <label>Titel <input name="title" maxlength="120" required></label><br>
+    <label>Notitie<br><textarea name="body" rows="4" cols="50" maxlength="4000" required></textarea></label><br>
+    <button type="submit">Opslaan</button>
+  </form>
+
+  <hr>
+
+  {# Jinja escapet {{ ... }} standaard, dus een notitie met <script> erin
+     wordt als tekst weergegeven en niet uitgevoerd. Gebruik hier nooit
+     |safe, dat zet precies die bescherming uit. #}
+  {% for note in notes %}
+    <article>
+      <h2>{{ note[1] }}</h2>
+      <p>{{ note[2] }}</p>
+      <p><small>{{ note[3] }}</small></p>
+      <form method="post" action="{{ url_for('delete_note', note_id=note[0]) }}">
+        <button type="submit">Verwijderen</button>
+      </form>
+    </article>
+  {% else %}
+    <p>Nog geen notities.</p>
+  {% endfor %}
+</body>
+</html>

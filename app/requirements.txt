@@ -1,0 +1,9 @@
+# Bewust nog zonder vastgepinde versies: pin deze met `pip freeze` zodra je
+# de eerste keer hebt gedraaid. Ik gok geen versienummers.
+# Het pinnen zelf is later ook het aangrijpingspunt voor de SBoM en
+# dependency scanning (BoK: SBoM, CI/CD security checks).
+flask
+psycopg[binary]
+argon2-cffi
+pyotp
+gunicorn
