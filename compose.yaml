@@ -62,7 +62,7 @@ services:
     # host 0.0.0.0 is nodig om de app buiten de container te kunnen bereiken.
     # --debug zet ook de Werkzeug-debugger aan, en die kan code uitvoeren:
     # dit hoort uitsluitend lokaal, nooit in Azure.
-    command: flask --app app run --host 0.0.0.0 --port 5000 --debug
+    command: flask --app application run --host 0.0.0.0 --port 5000 --debug
 
 volumes:
   dbdata:
