@@ -14,8 +14,14 @@ services:
     image: postgres:17
     environment:
       POSTGRES_DB: notities
-      POSTGRES_USER: notities_app
+      # Dit account is in het officiele postgres-image een superuser. Het
+      # wordt alleen gebruikt voor initialisatie en migraties, nooit door de
+      # applicatie zelf.
+      POSTGRES_USER: notities_owner
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?zet POSTGRES_PASSWORD in .env}
+      # Worden door roles.sh gebruikt om de beperkte applicatierol te maken.
+      APP_DB_USER: notities_app
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?zet APP_DB_PASSWORD in .env}
     # Alleen op localhost luisteren, niet op alle interfaces: de database
     # hoort niet bereikbaar te zijn voor andere machines in je netwerk.
     ports:
@@ -23,11 +29,13 @@ services:
     volumes:
       - dbdata:/var/lib/postgresql/data
       # Alles in deze map draait automatisch bij de ALLEREERSTE start van een
-      # leeg datavolume. Pas je schema.sql later aan, dan gebeurt er niets
-      # meer: verwijder dan eerst het volume (docker compose down -v).
+      # leeg datavolume, op alfabetische volgorde. Pas je deze bestanden
+      # later aan, dan gebeurt er niets meer: verwijder dan eerst het volume
+      # (docker compose down -v).
       - ./app/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./app/roles.sh:/docker-entrypoint-initdb.d/02-roles.sh:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U notities_app -d notities"]
+      test: ["CMD-SHELL", "pg_isready -U notities_owner -d notities"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -41,8 +49,12 @@ services:
         condition: service_healthy
     environment:
       FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:?zet FLASK_SECRET_KEY in .env}
+      # Sleutel voor de kolomencryptie van users.totp_secret. Lokaal uit
+      # .env, later uit Key Vault (zie get_encryption_key in app.py).
+      DB_ENCRYPTION_KEY: ${DB_ENCRYPTION_KEY:?zet DB_ENCRYPTION_KEY in .env}
       # Hostname 'db' is de servicenaam hierboven; compose regelt de DNS.
-      DATABASE_URL: postgresql://notities_app:${POSTGRES_PASSWORD}@db:5432/notities
+      # Let op de gebruiker: de beperkte applicatierol, niet de eigenaar.
+      DATABASE_URL: postgresql://notities_app:${APP_DB_PASSWORD}@db:5432/notities
       # Lokaal draait dit op http, dus de Secure-vlag op de sessiecookie moet
       # uit. In Azure staat deze op true.
       COOKIE_SECURE: "false"

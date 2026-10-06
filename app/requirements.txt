@@ -6,4 +6,5 @@ flask
 psycopg[binary]
 argon2-cffi
 pyotp
+qrcode
 gunicorn
