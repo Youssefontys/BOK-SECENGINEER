@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Mijn profiel{% endblock %}
+{% block content %}
+  <header class="bar">
+    <h1>Mijn profiel</h1>
+    {% include "_account_menu.html" %}
+  </header>
+  <section class="card">
+    <dl class="profile-details">
+      <dt>Gebruikersnaam</dt><dd>{{ username }}</dd>
+      <dt>Account aangemaakt</dt><dd>{{ created_at.strftime('%d-%m-%Y') }}</dd>
+    </dl>
+    <a class="button secondary" href="{{ url_for('issue_recovery_code') }}">Herstelcode beheren</a>
+  </section>
+  <a href="{{ url_for('notes') }}">Terug naar notities</a>
+{% endblock %}

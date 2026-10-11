@@ -14,6 +14,24 @@ from conftest import log_in_as
 from vault_crypto import decrypt_note
 
 
+def test_profiel_vereist_volledige_login(client):
+    with client.session_transaction() as session:
+        session["pending_user_id"] = 1
+    response = client.get("/account/profile")
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/login"
+
+
+def test_profiel_toont_alleen_de_ingelogde_gebruiker(client, twee_gebruikers):
+    log_in_as(client, twee_gebruikers["test_gebruiker_b"])
+    response = client.get("/account/profile")
+    page = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "test_gebruiker_b" in page
+    assert "test_gebruiker_a" not in page
+    assert "password_hash" not in page and "totp_secret" not in page
+
+
 def test_gebruiker_ziet_notities_van_een_ander_niet(client, twee_gebruikers):
     log_in_as(client, twee_gebruikers["test_gebruiker_b"])
 

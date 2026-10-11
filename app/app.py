@@ -439,6 +439,20 @@ def issue_recovery_code():
     return render_template("recovery_code.html", recovery_code=recovery_code)
 
 
+@app.route("/account/profile")
+def profile():
+    user_id = session.get("user_id")
+    if user_id is None:
+        return redirect(url_for("login"))
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT username, created_at FROM users WHERE id = %s", (user_id,))
+        row = cur.fetchone()
+    if row is None:
+        session.clear()
+        return redirect(url_for("login"))
+    return render_template("profile.html", username=row[0], created_at=row[1])
+
+
 @app.route("/logout", methods=["POST"])
 def logout():
     session.clear()

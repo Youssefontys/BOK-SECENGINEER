@@ -10,10 +10,7 @@
 
   <header class="bar">
     <h1>Mijn notities</h1>
-    <a href="{{ url_for('issue_recovery_code') }}">Herstelcode beheren</a>
-    <form method="post" action="{{ url_for('logout') }}">
-      <button type="submit" class="secondary">Uitloggen</button>
-    </form>
+    {% include "_account_menu.html" %}
   </header>
 
   {% if error %}<p class="error">{{ error }}</p>{% endif %}

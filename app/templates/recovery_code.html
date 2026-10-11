@@ -3,7 +3,7 @@
 {% block content %}
   <header class="bar">
     <h1>Herstelcode beheren</h1>
-    <a href="{{ url_for('notes') }}">Terug naar notities</a>
+    {% include "_account_menu.html" %}
   </header>
   {% if recovery_code %}
     {% include "_recovery_code.html" %}
@@ -25,4 +25,5 @@
       <button type="submit">Nieuwe herstelcode aanmaken</button>
     </form>
   {% endif %}
+  <a href="{{ url_for('notes') }}">Terug naar notities</a>
 {% endblock %}

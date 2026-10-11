@@ -26,6 +26,8 @@
     </form>
   </div>
 
-  <p class="hint"><a href="{{ url_for('register') }}">Nog geen account? Registreren</a></p>
-  <p><a href="{{ url_for('recover') }}">Wachtwoord vergeten?</a></p>
+  <nav class="auth-links hint" aria-label="Accountopties">
+    <a href="{{ url_for('register') }}">Nog geen account? Registreren</a>
+    <a href="{{ url_for('recover') }}">Wachtwoord vergeten?</a>
+  </nav>
 {% endblock %}

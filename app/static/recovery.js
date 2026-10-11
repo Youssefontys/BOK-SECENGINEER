@@ -2,6 +2,16 @@
 
 const recoveryCode = document.getElementById("recovery-code");
 const copyStatus = document.getElementById("recovery-copy-status");
+const recoverySaved = document.getElementById("recovery-saved");
+const continueEnrollment = document.getElementById("continue-enrollment");
+
+if (recoverySaved && continueEnrollment) {
+  const updateContinue = () => { continueEnrollment.disabled = !recoverySaved.checked; };
+  continueEnrollment.hidden = false;
+  recoverySaved.addEventListener("change", updateContinue);
+  window.addEventListener("pageshow", updateContinue);
+  updateContinue();
+}
 
 if (recoveryCode) {
   document.getElementById("copy-recovery-code").addEventListener("click", async () => {
