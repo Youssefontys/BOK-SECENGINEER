@@ -44,7 +44,13 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD:?zet POSTGRES_PASSWORD in .env}
     volumes:
       - ./app/migrations:/migrations:ro
-    command: psql -h db -U notities_owner -d notities -v ON_ERROR_STOP=1 -f /migrations/001_notes_encryption.sql
+    command:
+      - sh
+      - -ec
+      - |
+        for migration in /migrations/*.sql; do
+          psql -h db -U notities_owner -d notities -v ON_ERROR_STOP=1 -f "$$migration"
+        done
 
   vault:
     image: hashicorp/vault:1.21

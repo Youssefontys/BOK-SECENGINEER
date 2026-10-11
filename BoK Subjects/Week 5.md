@@ -20,7 +20,22 @@ De applicatie implementeert zelf gebruikersauthenticatie, zonder externe identit
 - De sessie wordt gewist na de wachtwoordstap, na succesvolle MFA en bij uitloggen. Een fout wachtwoord en een onbekende gebruikersnaam geven dezelfde foutmelding.
 - SQL-queries gebruiken parameters. Notitiequeries filteren op `user_id`, zodat een geauthenticeerde gebruiker alleen eigen notities kan benaderen. Dit is autorisatie, aanvullend op authenticatie.
 
-**Nog ontbrekend:** rate limiting/account lockout, het voorkomen van hergebruik van een reeds geaccepteerde TOTP-code, een vervaltijd voor de pending MFA-stap en CSRF-tokens. De registratie bevestigt nog niet dat de authenticator succesvol is ingesteld. TOTP is niet phishingbestendig. Ook kan de snellere afhandeling van onbekende gebruikersnamen accounts via timing verklappen. De encryptiesleutel wordt aan PostgreSQL doorgegeven; externe secretopslag en sleutelrotatie zijn nog niet geïmplementeerd. Deze implementatie is daarom een concept en geen volledig geharde authenticatielaag.
+TOTP-verificatie bewaart het laatst gebruikte tijdsinterval in de database en accepteert het niet opnieuw. De pending MFA-stap vervalt na tien minuten. Authenticatie- en herstelformulieren hebben CSRF-tokens. Een sessieversie wordt bij iedere geauthenticeerde aanvraag gecontroleerd, zodat wachtwoordherstel bestaande sessies en pending logins ongeldig maakt.
+
+**Nog ontbrekend:** rate limiting/account lockout voor gewone login en login/2FA, en CSRF-tokens voor notitiemutaties en uitloggen. De registratie bevestigt nog niet dat de authenticator succesvol is ingesteld. TOTP is niet phishingbestendig. Ook kan de snellere afhandeling van onbekende gebruikersnamen accounts via timing verklappen. De encryptiesleutel voor TOTP wordt aan PostgreSQL doorgegeven; externe secretopslag en sleutelrotatie hiervoor zijn nog niet geïmplementeerd. Deze implementatie is daarom een concept en geen volledig geharde authenticatielaag.
+
+### Wachtwoordherstel
+
+Herstel via `/recover` vereist **gebruikersnaam + eenmalige herstelcode + actuele 2FA-code**, plus een nieuw wachtwoord dat tweemaal wordt ingevoerd. Alleen een gestolen herstelcode is dus onvoldoende. Na herstel moet de gebruiker opnieuw inloggen met het nieuwe wachtwoord en een nieuwe authenticator-code.
+
+- Bij registratie wordt een willekeurige herstelcode van 192 bits eenmaal getoond naast de 2FA-QR-code. Kopiëren/downloaden gebeurt lokaal in de browser. De database bewaart alleen een Argon2id-hash; cookies en URLs bevatten de herstelcode niet.
+- Herstelcode en TOTP worden samen met de wachtwoordwijziging transactioneel verbruikt. Een row lock voorkomt dat twee gelijktijdige herstelverzoeken dezelfde code gebruiken.
+- Poginglimieten staan in PostgreSQL en gelden over workers heen: maximaal vijf herstelpogingen per account en twintig per client-IP, per vijftien minuten. Verkeerde bewijzen geven dezelfde foutmelding.
+- Herstel verhoogt de sessieversie. Oude sessies en eerder begonnen logins verliezen toegang. Geheime pagina's worden met `Cache-Control: no-store` verstuurd.
+- Bestaande gebruikers maken een herstelcode aan via **Herstelcode beheren**, met hun huidige wachtwoord en een verse 2FA-code. Aanmaken vervangt een eerdere code. Na gebruik kan daar een nieuwe code worden aangemaakt.
+- Bewaar de code offline of in een wachtwoordmanager, apart van de authenticator. Zonder herstelcode of authenticator is deze zelfservice-route niet beschikbaar; er is geen bypass.
+
+De IP-limiet gebruikt het directe clientadres. Achter een proxy moet de vertrouwde proxyconfiguratie apart worden ingericht; ongecontroleerde forwarding-headers worden niet vertrouwd.
 
 ### System authentication: databaseaccount en Vault-token
 

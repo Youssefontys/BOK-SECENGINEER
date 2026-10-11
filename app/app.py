@@ -7,9 +7,13 @@ zijn. Bewust nog niet compleet: zie de lijst onderaan dit bestand.
 """
 
 import base64
+import hashlib
+import hmac
 import io
 import os
 import re
+import secrets
+import time
 import unicodedata
 
 import psycopg
@@ -36,6 +40,7 @@ app.config.update(
     SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "true").lower() == "true",
     # Beperkt dat de cookie meegaat bij cross-site requests (CSRF).
     SESSION_COOKIE_SAMESITE="Lax",
+    MAX_CONTENT_LENGTH=64 * 1024,
 )
 
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -48,6 +53,93 @@ ph = PasswordHasher()
 USERNAME_PATTERN = re.compile(r"[a-z0-9_]{3,32}")
 MAX_TITLE = 120
 MAX_BODY = 4000
+DUMMY_RECOVERY_HASH = ph.hash(secrets.token_hex(24))
+AUTH_FORMS = {"register", "login", "login_2fa", "recover", "issue_recovery_code"}
+
+
+def csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_urlsafe(32)
+    return session["csrf_token"]
+
+
+app.jinja_env.globals["csrf_token"] = csrf_token
+
+
+def is_session_current(user_id, version):
+    if version is None:
+        return False
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT auth_version FROM users WHERE id = %s", (user_id,))
+        row = cur.fetchone()
+    return row is not None and row[0] == version
+
+
+@app.before_request
+def protect_authentication():
+    if request.endpoint == "static":
+        return None
+    user_id = session.get("user_id")
+    if user_id is not None and not is_session_current(user_id, session.get("auth_version")):
+        session.clear()
+        if request.endpoint not in {"login", "register", "recover"}:
+            return redirect(url_for("login"))
+    if request.method == "POST" and request.endpoint in AUTH_FORMS:
+        expected = session.get("csrf_token", "")
+        received = request.form.get("csrf_token", "")
+        if not expected or not hmac.compare_digest(expected.encode(), received.encode()):
+            abort(400, description="Formulier verlopen. Open de pagina opnieuw.")
+
+
+def generate_recovery_code():
+    raw = secrets.token_hex(24).upper()
+    display = "-".join(raw[i:i + 8] for i in range(0, len(raw), 8))
+    return display, ph.hash(raw)
+
+
+def normalize_recovery_code(value):
+    if len(value) > 80:
+        return ""
+    normalized = value.replace("-", "").replace(" ", "").upper()
+    return normalized if re.fullmatch(r"[0-9A-F]{48}", normalized) else ""
+
+
+def matching_totp_step(secret, code, last_used=None):
+    if not re.fullmatch(r"[0-9]{6}", code):
+        return None
+    current = int(time.time()) // 30
+    totp = pyotp.TOTP(secret)
+    for step in (current + 1, current, current - 1):
+        if (last_used is None or step > last_used) and hmac.compare_digest(totp.at(step * 30), code):
+            return step
+    return None
+
+
+def rate_key(scope, kind, value):
+    return hmac.new(app.secret_key.encode(), f"{scope}:{kind}:{value}".encode(), hashlib.sha256).hexdigest()
+
+
+def allow_recovery_attempt(scope, account):
+    """Gedeelde PostgreSQL-limiet, dus ook effectief met meerdere workers."""
+    keys = [(rate_key(scope, "ip", request.remote_addr or "unknown"), 20),
+            (rate_key(scope, "account", account), 5)]
+    with db() as conn, conn.cursor() as cur:
+        for key, maximum in keys:
+            cur.execute(
+                "INSERT INTO recovery_attempts (key, attempts, window_started) VALUES (%s, 1, now())"
+                " ON CONFLICT (key) DO UPDATE SET"
+                " attempts = CASE WHEN recovery_attempts.window_started < now() - interval '15 minutes'"
+                " THEN 1 ELSE recovery_attempts.attempts + 1 END,"
+                " window_started = CASE WHEN recovery_attempts.window_started < now() - interval '15 minutes'"
+                " THEN now() ELSE recovery_attempts.window_started END RETURNING attempts", (key,)
+            )
+            if cur.fetchone()[0] > maximum:
+                return False
+        cur.execute(
+            "DELETE FROM recovery_attempts WHERE key IN (SELECT key FROM recovery_attempts"
+            " WHERE window_started < now() - interval '1 day' LIMIT 100 FOR UPDATE SKIP LOCKED)"
+        )
+    return True
 
 
 def db():
@@ -121,6 +213,8 @@ def security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     # Geen URL's van deze app meesturen naar externe sites.
     response.headers["Referrer-Policy"] = "no-referrer"
+    if request.endpoint in AUTH_FORMS:
+        response.headers["Cache-Control"] = "no-store"
     # HSTS hoort hier nog niet: dat zet je pas aan achter HTTPS in Azure,
     # anders maak je localhost over http onbruikbaar.
     return response
@@ -184,12 +278,13 @@ def register():
 
     # Lengte-eis in plaats van complexiteitsregels met verplichte
     # hoofdletters en tekens, conform de aanbeveling in NIST SP 800-63B.
-    if len(password) < 12:
+    if not 12 <= len(password) <= 1024:
         return render_template(
-            "register.html", error="Wachtwoord moet minimaal 12 tekens zijn."
+            "register.html", error="Wachtwoord moet 12 tot 1024 tekens zijn."
         ), 400
 
     totp_secret = pyotp.random_base32()
+    recovery_code, recovery_hash = generate_recovery_code()
 
     try:
         with db() as conn, conn.cursor() as cur:
@@ -199,9 +294,9 @@ def register():
             # De TOTP-secret gaat versleuteld de kolom in (pgcrypto), de
             # wachtwoord-hash niet: die is al onomkeerbaar.
             cur.execute(
-                "INSERT INTO users (username, password_hash, totp_secret)"
-                " VALUES (%s, %s, pgp_sym_encrypt(%s, %s))",
-                (username, ph.hash(password), totp_secret, get_encryption_key()),
+                "INSERT INTO users (username, password_hash, totp_secret, recovery_code_hash)"
+                " VALUES (%s, %s, pgp_sym_encrypt(%s, %s), %s)",
+                (username, ph.hash(password), totp_secret, get_encryption_key(), recovery_hash),
             )
     except psycopg.errors.UniqueViolation:
         return render_template(
@@ -211,20 +306,20 @@ def register():
     # De secret wordt één keer getoond zodat je hem in een authenticator-app
     # kunt zetten. Daarna staat hij alleen nog in de database.
     uri = pyotp.TOTP(totp_secret).provisioning_uri(name=username, issuer_name="Notitie-app")
-    return render_template("enroll.html", secret=totp_secret, qr=qr_data_uri(uri))
+    return render_template("enroll.html", secret=totp_secret, qr=qr_data_uri(uri), recovery_code=recovery_code)
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "GET":
-        return render_template("login.html")
+        return render_template("login.html", password_reset=session.pop("password_reset", False))
 
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
 
     with db() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT id, password_hash FROM users WHERE username = %s", (username,)
+            "SELECT id, password_hash, auth_version FROM users WHERE username = %s", (username,)
         )
         row = cur.fetchone()
 
@@ -238,13 +333,16 @@ def login():
     # aparte sessiesleutel, zodat een halve login nergens toegang geeft.
     session.clear()
     session["pending_user_id"] = row[0]
+    session["pending_auth_version"] = row[2]
+    session["pending_since"] = time.time()
     return redirect(url_for("login_2fa"))
 
 
 @app.route("/login/2fa", methods=["GET", "POST"])
 def login_2fa():
     user_id = session.get("pending_user_id")
-    if user_id is None:
+    if user_id is None or time.time() - session.get("pending_since", 0) > 600:
+        session.clear()
         return redirect(url_for("login"))
 
     if request.method == "GET":
@@ -256,27 +354,89 @@ def login_2fa():
         # Ontsleutelen gebeurt in de database, want daar staat de versleutelde
         # kolom. De applicatie krijgt de leesbare secret terug.
         cur.execute(
-            "SELECT pgp_sym_decrypt(totp_secret, %s) FROM users WHERE id = %s",
+            "SELECT pgp_sym_decrypt(totp_secret, %s), auth_version, last_totp_step"
+            " FROM users WHERE id = %s FOR UPDATE",
             (get_encryption_key(), user_id),
         )
         row = cur.fetchone()
-
-    if row is None:
-        session.clear()
-        return redirect(url_for("login"))
-
-    # valid_window=1 accepteert ook de vorige en volgende code van 30
-    # seconden, zodat een klein klokverschil geen mislukte login oplevert.
-    if not pyotp.TOTP(row[0]).verify(code, valid_window=1):
-        return render_template("twofactor.html", error="Ongeldige code."), 401
+        if row is None or row[1] != session.get("pending_auth_version"):
+            session.clear()
+            return redirect(url_for("login"))
+        step = matching_totp_step(row[0], code, row[2])
+        if step is None:
+            return render_template("twofactor.html", error="Ongeldige of al gebruikte code. Wacht op een nieuwe code."), 401
+        cur.execute("UPDATE users SET last_totp_step = %s WHERE id = %s", (step, user_id))
 
     # Nieuwe sessie-inhoud na het voltooien van de login, zodat de
     # pending-status niet blijft staan.
     session.clear()
     session["user_id"] = user_id
+    session["auth_version"] = row[1]
     # Eenmalige vlag voor de "access granted"-melding op de notitiepagina.
     session["just_logged_in"] = True
     return redirect(url_for("notes"))
+
+
+@app.route("/recover", methods=["GET", "POST"])
+def recover():
+    if request.method == "GET":
+        return render_template("recover.html")
+    username = request.form.get("username", "").strip()
+    if not allow_recovery_attempt("recover", username):
+        return render_template("recover.html", error="Te veel pogingen. Probeer het over 15 minuten opnieuw.", username=username), 429
+    password = request.form.get("password", "")
+    if not 12 <= len(password) <= 1024 or password != request.form.get("password_confirm", ""):
+        return render_template("recover.html", error="Kies twee keer hetzelfde wachtwoord van 12 tot 1024 tekens.", username=username), 400
+    code = normalize_recovery_code(request.form.get("recovery_code", ""))
+    otp = request.form.get("code", "").strip()
+    with db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, recovery_code_hash, pgp_sym_decrypt(totp_secret, %s), last_totp_step"
+            " FROM users WHERE username = %s FOR UPDATE", (get_encryption_key(), username)
+        )
+        row = cur.fetchone()
+        stored = row[1] if row and row[1] else DUMMY_RECOVERY_HASH
+        code_matches = password_matches(stored, code)
+        step = matching_totp_step(row[2] if row else "A" * 32, otp, row[3] if row else None)
+        if row is None or row[1] is None or not code_matches or step is None:
+            return render_template("recover.html", error="Herstelgegevens zijn onjuist, gebruikt of verlopen.", username=username), 401
+        # Row lock voorkomt dubbel gebruik; alles wordt samen gecommit.
+        cur.execute(
+            "UPDATE users SET password_hash = %s, recovery_code_hash = NULL,"
+            " auth_version = auth_version + 1, last_totp_step = %s WHERE id = %s",
+            (ph.hash(password), step, row[0]),
+        )
+    session.clear()
+    session["password_reset"] = True
+    return redirect(url_for("login"))
+
+
+@app.route("/account/recovery-code", methods=["GET", "POST"])
+def issue_recovery_code():
+    user_id = session.get("user_id")
+    if user_id is None:
+        return redirect(url_for("login"))
+    if request.method == "GET":
+        return render_template("recovery_code.html")
+    if not allow_recovery_attempt("issue-recovery", str(user_id)):
+        return render_template("recovery_code.html", error="Te veel pogingen. Probeer het over 15 minuten opnieuw."), 429
+    with db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT password_hash, pgp_sym_decrypt(totp_secret, %s), last_totp_step, auth_version"
+            " FROM users WHERE id = %s FOR UPDATE", (get_encryption_key(), user_id)
+        )
+        row = cur.fetchone()
+        if row is None or row[3] != session.get("auth_version"):
+            session.clear()
+            return redirect(url_for("login"))
+        password_ok = password_matches(row[0], request.form.get("password", ""))
+        step = matching_totp_step(row[1], request.form.get("code", "").strip(), row[2])
+        if not password_ok or step is None:
+            return render_template("recovery_code.html", error="Onjuist wachtwoord of ongeldige/al gebruikte 2FA-code."), 401
+        recovery_code, recovery_hash = generate_recovery_code()
+        cur.execute("UPDATE users SET recovery_code_hash = %s, last_totp_step = %s WHERE id = %s",
+                    (recovery_hash, step, user_id))
+    return render_template("recovery_code.html", recovery_code=recovery_code)
 
 
 @app.route("/logout", methods=["POST"])

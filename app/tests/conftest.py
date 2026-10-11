@@ -32,6 +32,7 @@ def log_in_as(client, user_id):
     """
     with client.session_transaction() as session:
         session["user_id"] = user_id
+        session["auth_version"] = 0
 
 
 @pytest.fixture

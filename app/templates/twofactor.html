@@ -10,6 +10,7 @@
 
   <div class="card">
     <form method="post">
+      {% include "_csrf.html" %}
       <label>Zescijferige code
         <input name="code" inputmode="numeric" autocomplete="one-time-code"
                pattern="[0-9]{6}" maxlength="6" required autofocus>

@@ -5,11 +5,17 @@
 
 {% block content %}
   <h1>Inloggen</h1>
+  {% if password_reset %}
+    <p class="card" role="status">Je wachtwoord is hersteld. Log in met je nieuwe
+       wachtwoord en een nieuwe authenticator-code. Je herstelcode is verbruikt;
+       maak na het inloggen een nieuwe aan via ‘Herstelcode beheren’.</p>
+  {% endif %}
 
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
 
   <div class="card">
     <form method="post">
+      {% include "_csrf.html" %}
       <label>Gebruikersnaam
         <input name="username" autocomplete="username" required>
       </label>
@@ -21,4 +27,5 @@
   </div>
 
   <p class="hint"><a href="{{ url_for('register') }}">Nog geen account? Registreren</a></p>
+  <p><a href="{{ url_for('recover') }}">Wachtwoord vergeten?</a></p>
 {% endblock %}
