@@ -107,11 +107,80 @@ main {
 
 header.bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 1.5rem;
 }
+
+header.bar h1 { margin-bottom: 0; }
+
+.auth-links {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.65rem 1rem;
+}
+
+.auth-links a:last-child { margin-left: auto; text-align: right; }
+
+.account-menu { position: relative; flex-shrink: 0; }
+
+.account-menu summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--accent);
+  cursor: pointer;
+  list-style: none;
+}
+
+.account-menu summary::-webkit-details-marker { display: none; }
+.account-menu summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.account-menu summary:hover, .account-menu[open] summary { border-color: var(--accent); }
+.account-menu svg { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linejoin: round; }
+
+.account-menu-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 5;
+  width: 13rem;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.account-menu-panel a, .account-menu-panel button {
+  display: block;
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  box-shadow: none;
+}
+
+.account-menu-panel a:hover, .account-menu-panel button:hover { background: var(--bg); }
+.account-menu-panel form { margin: 0.3rem 0 0; border-top: 1px solid var(--border); }
+.account-menu-panel button { color: var(--danger); }
+
+.profile-details { margin: 0 0 1.5rem; }
+.profile-details dt { color: var(--muted); font-size: 0.84rem; }
+.profile-details dd { margin: 0.25rem 0 1rem; }
 
 h1 {
   margin: 0 0 1.25rem;
@@ -242,6 +311,31 @@ button:focus-visible, .button:focus-visible {
   font-size: 1rem;
   letter-spacing: 0.04em;
   user-select: all;
+  color: var(--danger);
+  border-color: var(--danger);
+  background: rgba(255, 107, 107, 0.08);
+}
+
+.enrollment-confirm button[hidden] { display: none; }
+.button.primary-action:disabled { opacity: 0.45; cursor: not-allowed; box-shadow: none; }
+
+.check-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  margin: 1rem 0;
+  color: var(--text);
+  font: inherit;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.check-label input {
+  width: 1.15rem;
+  height: 1.15rem;
+  margin: 0.2rem 0 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
 }
 
 .error {

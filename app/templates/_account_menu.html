@@ -1,0 +1,15 @@
+<details class="account-menu">
+  <summary aria-label="Accountmenu" title="Accountmenu">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" focusable="false">
+      <path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/>
+      <path d="m10 2-.5 3a8 8 0 0 0-2 1.2L4.7 5.1l-2 3.5L5 10.5a8 8 0 0 0 0 3l-2.3 1.9 2 3.5 2.8-1.1a8 8 0 0 0 2 1.2l.5 3h4l.5-3a8 8 0 0 0 2-1.2l2.8 1.1 2-3.5-2.3-1.9a8 8 0 0 0 0-3l2.3-1.9-2-3.5-2.8 1.1a8 8 0 0 0-2-1.2L14 2Z"/>
+    </svg>
+  </summary>
+  <nav class="account-menu-panel" aria-label="Account">
+    <a href="{{ url_for('profile') }}">Profiel</a>
+    <a href="{{ url_for('issue_recovery_code') }}">Herstelcode beheren</a>
+    <form method="post" action="{{ url_for('logout') }}">
+      <button type="submit">Uitloggen</button>
+    </form>
+  </nav>
+</details>

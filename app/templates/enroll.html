@@ -24,5 +24,12 @@
   </div>
 
   {% include "_recovery_code.html" %}
-  <a class="button primary-action" href="{{ url_for('login') }}">Doorgaan naar inloggen</a>
+  <form class="enrollment-confirm" method="get" action="{{ url_for('login') }}">
+    <label class="check-label">
+      <input id="recovery-saved" type="checkbox" required>
+      <span>Ik heb mijn eenmalige herstelcode veilig bewaard.</span>
+    </label>
+    <button id="continue-enrollment" type="submit" class="button primary-action" hidden disabled>Doorgaan naar inloggen</button>
+    <noscript><button type="submit" class="button primary-action">Doorgaan naar inloggen</button></noscript>
+  </form>
 {% endblock %}
