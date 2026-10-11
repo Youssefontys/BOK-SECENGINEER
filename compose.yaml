@@ -53,7 +53,9 @@ services:
     volumes:
       - vaultdata:/vault/file
       - ./vault/config.hcl:/vault/config/local.hcl:ro
-    command: server -config=/vault/config/local.hcl
+    # Het image voegt zelf -config=/vault/config toe. Een extra verwijzing
+    # naar local.hcl laadt dezelfde listener twee keer (poort 8200 bezet).
+    command: server
     restart: unless-stopped
     # Geen hostpoort: alleen containers op het Compose-netwerk bereiken Vault.
 

@@ -6,6 +6,9 @@ is niet nodig. Deze configuratie is uitsluitend voor ontwikkeling en CI.
 
 - `vault` gebruikt file-storage in `vaultdata`; encryptiesleutels blijven behouden
   na een containerherstart. Er is geen hostpoort voor Vault.
+  Het startcommando is `server`: het officiële image leest `/vault/config`
+  automatisch. Geef niet nogmaals hetzelfde bestand via `-config` mee, omdat
+  Vault dan dezelfde listener twee keer probeert te openen.
 - `vault-init` initialiseert en unsealt Vault, activeert Transit, maakt de
   `aes256-gcm96`-sleutel `notes` en een beperkt token. De service blijft draaien om
   Vault na een herstart te unsealen en het periodieke token te vernieuwen.
