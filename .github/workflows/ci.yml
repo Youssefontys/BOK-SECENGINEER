@@ -52,6 +52,20 @@ jobs:
       - name: Tests draaien
         run: docker compose exec -T app python -m pytest tests -v
 
+      - name: Vault-sleutels na herstart controleren
+        run: |
+          docker compose exec -T app python tests/vault_restart_probe.py save
+          docker compose restart vault
+          for poging in $(seq 1 30); do
+            if docker compose exec -T app python tests/vault_restart_probe.py check; then
+              echo "Bestaande ciphertext blijft leesbaar na Vault-herstart."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Vault-herstartcontrole mislukt."
+          exit 1
+
       - name: Logs tonen bij een mislukte run
         if: failure()
         run: docker compose logs

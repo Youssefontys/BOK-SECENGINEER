@@ -1,4 +1,4 @@
-# Lokale ontwikkelomgeving: app plus database in één commando.
+# Lokale ontwikkelomgeving: app, database en Vault in één commando.
 # Niet bedoeld voor Azure, daar draait de image in App Service met een Azure Database for PostgreSQL.
 
 services:
@@ -34,6 +34,48 @@ services:
       timeout: 3s
       retries: 10
 
+  db-migrate:
+    image: postgres:17
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?zet POSTGRES_PASSWORD in .env}
+    volumes:
+      - ./app/migrations:/migrations:ro
+    command: psql -h db -U notities_owner -d notities -v ON_ERROR_STOP=1 -f /migrations/001_notes_encryption.sql
+
+  vault:
+    image: hashicorp/vault:1.21
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - vaultdata:/vault/file
+      - ./vault/config.hcl:/vault/config/local.hcl:ro
+    command: server -config=/vault/config/local.hcl
+    restart: unless-stopped
+    # Geen hostpoort: alleen containers op het Compose-netwerk bereiken Vault.
+
+  vault-init:
+    image: python:3.13-slim
+    depends_on:
+      vault:
+        condition: service_started
+    environment:
+      VAULT_ADDR: http://vault:8200
+    volumes:
+      - ./scripts/vault_init.py:/bootstrap/vault_init.py:ro
+      - vaultbootstrap:/bootstrap-state
+      - vaulttoken:/app-token
+    command: python -u /bootstrap/vault_init.py
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "/bootstrap/vault_init.py", "--health"]
+      interval: 5s
+      timeout: 4s
+      retries: 24
+      start_period: 10s
+
   app:
     build: ./app
     depends_on:
@@ -41,17 +83,17 @@ services:
       # bestaat. Anders krijg je bij de eerste start connection refused.
       db:
         condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
       # En wachten tot de transit engine is ingericht, anders faalt de eerste
       # versleuteling.
       vault-init:
-        condition: service_completed_successfully
+        condition: service_healthy
     environment:
       FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:?zet FLASK_SECRET_KEY in .env}
       VAULT_ADDR: http://vault:8200
-      # Root token, puur omdat dit dev mode is. In een echte opzet krijgt de
-      # app een AppRole met een policy die alleen transit/encrypt/notes en
-      # transit/decrypt/notes toestaat.
-      VAULT_TOKEN: ${VAULT_TOKEN}
+      # Alleen een beperkt transit-token; geen root-token in de app.
+      VAULT_TOKEN_FILE: /run/vault/token
       # Sleutel voor de kolomencryptie van users.totp_secret. Lokaal uit
       # .env, later uit Key Vault (zie get_encryption_key in app.py).
       DB_ENCRYPTION_KEY: ${DB_ENCRYPTION_KEY:?zet DB_ENCRYPTION_KEY in .env}
@@ -67,11 +109,16 @@ services:
       # Broncode vanaf de host, zodat een wijziging direct zichtbaar is
       # zonder rebuild.
       - ./app:/app
+      - vaulttoken:/run/vault:ro
     # Dev-server met reload, in plaats van de gunicorn uit de Dockerfile.
     # host 0.0.0.0 is nodig om de app buiten de container te kunnen bereiken.
     # --debug zet ook de Werkzeug-debugger aan, en die kan code uitvoeren:
     # dit hoort uitsluitend lokaal, nooit in Azure.
-    command: flask --app app run --host 0.0.0.0 --port 5000 --debug
+    # Zet legacy-notities om voor de server start; bij fouten stopt de startup.
+    command: sh -c 'flask --app app encrypt-notes && flask --app app run --host 0.0.0.0 --port 5000 --debug'
 
 volumes:
   dbdata:
+  vaultdata:
+  vaultbootstrap:
+  vaulttoken:
