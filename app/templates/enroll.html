@@ -23,5 +23,6 @@
     </p>
   </div>
 
-  <p class="hint"><a href="{{ url_for('login') }}">Doorgaan naar inloggen</a></p>
+  {% include "_recovery_code.html" %}
+  <a class="button primary-action" href="{{ url_for('login') }}">Doorgaan naar inloggen</a>
 {% endblock %}

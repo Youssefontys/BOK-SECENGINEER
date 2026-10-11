@@ -35,7 +35,7 @@ GRANT USAGE ON SCHEMA public TO ${APP_DB_USER};
 
 -- Alleen de vier bewerkingen die de applicatie echt uitvoert, en alleen op
 -- deze twee tabellen. Geen TRUNCATE, geen REFERENCES, geen TRIGGER.
-GRANT SELECT, INSERT, UPDATE, DELETE ON users, notes TO ${APP_DB_USER};
+GRANT SELECT, INSERT, UPDATE, DELETE ON users, notes, recovery_attempts TO ${APP_DB_USER};
 
 -- SERIAL-kolommen gebruiken een sequence; zonder dit recht mislukt elke
 -- INSERT met een nieuw id.

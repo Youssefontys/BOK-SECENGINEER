@@ -1,0 +1,15 @@
+<section class="card">
+  <h2>Bewaar je eenmalige herstelcode</h2>
+  <p>Deze code wordt maar één keer getoond. Bewaar hem in je wachtwoordmanager
+     of offline, apart van je authenticator.</p>
+  <code id="recovery-code" class="recovery-code">{{ recovery_code }}</code>
+  <div class="note-actions">
+    <button type="button" id="copy-recovery-code">Kopiëren</button>
+    <button type="button" id="download-recovery-code" class="secondary">Downloaden</button>
+  </div>
+  <p id="recovery-copy-status" class="hint" role="status" aria-live="polite"></p>
+  <p class="hint">Bij wachtwoordherstel heb je je gebruikersnaam, deze code én
+     een actuele 2FA-code nodig. Na gebruik is deze herstelcode ongeldig.
+     Maak na herstel een nieuwe code aan zodra je weer bent ingelogd.</p>
+</section>
+<script src="{{ url_for('static', filename='recovery.js') }}" defer></script>

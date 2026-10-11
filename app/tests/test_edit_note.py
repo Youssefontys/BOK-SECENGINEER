@@ -17,6 +17,7 @@ def cursor(monkeypatch):
     connection = MagicMock()
     cursor = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
     monkeypatch.setattr(application, "db", lambda: connection)
+    monkeypatch.setattr(application, "is_session_current", lambda user_id, version: version == 0)
     monkeypatch.setattr(application, "encrypt_note", lambda value: "vault:v1:" + value)
     monkeypatch.setattr(application, "decrypt_note", lambda value: value.removeprefix("vault:v1:"))
     return cursor

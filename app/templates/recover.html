@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Wachtwoord herstellen{% endblock %}
+{% block body_class %}auth{% endblock %}
+{% block scene %}{% include "_scene.html" %}{% endblock %}
+{% block content %}
+  <h1>Wachtwoord herstellen</h1>
+  <p>Gebruik je gebruikersnaam, eenmalige herstelcode en authenticator-code
+     om een nieuw wachtwoord in te stellen.</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" class="card">
+    {% include "_csrf.html" %}
+    <label>Gebruikersnaam
+      <input name="username" autocomplete="username" maxlength="32" required value="{{ username or '' }}">
+    </label>
+    <label>Eenmalige herstelcode
+      <input name="recovery_code" autocomplete="off" maxlength="80" spellcheck="false" required>
+    </label>
+    <label>Actuele 2FA-code
+      <input name="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required>
+    </label>
+    <label>Nieuw wachtwoord
+      <input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
+    </label>
+    <label>Nieuw wachtwoord herhalen
+      <input name="password_confirm" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
+    </label>
+    <button type="submit">Wachtwoord herstellen</button>
+  </form>
+  <p class="hint">Gebruik een nieuwe code uit je authenticator. Zonder herstelcode
+     of toegang tot je authenticator kun je deze herstelroute niet gebruiken.</p>
+  <a href="{{ url_for('login') }}">Terug naar inloggen</a>
+{% endblock %}

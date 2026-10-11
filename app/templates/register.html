@@ -10,6 +10,7 @@
 
   <div class="card">
     <form method="post">
+      {% include "_csrf.html" %}
       <label>Gebruikersnaam
         <input name="username" autocomplete="username" required
                minlength="3" maxlength="32" pattern="[a-z0-9_]+">

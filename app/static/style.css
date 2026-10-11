@@ -172,7 +172,10 @@ input:focus, textarea:focus {
 
 textarea { resize: vertical; min-height: 6rem; }
 
-button {
+button, .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0.6rem 1.15rem;
   border: 1px solid var(--accent);
   border-radius: 8px;
@@ -181,21 +184,65 @@ button {
   font: inherit;
   font-weight: 600;
   cursor: pointer;
+  text-decoration: none;
   transition: background 120ms, box-shadow 120ms;
 }
 
-button:hover {
+button:hover, .button:hover {
   background: rgba(53, 224, 192, 0.22);
   box-shadow: 0 0 18px -4px rgba(53, 224, 192, 0.5);
 }
 
-button.secondary {
+button.secondary, .button.secondary {
   border-color: var(--border);
   background: transparent;
   color: var(--muted);
 }
 
-button.secondary:hover { color: var(--text); box-shadow: none; }
+button.secondary:hover, .button.secondary:hover { color: var(--text); box-shadow: none; }
+
+button.danger {
+  border-color: #ad2435;
+  background: #ad2435;
+  color: #fff;
+}
+
+button.danger:hover {
+  border-color: #cf3046;
+  background: #cf3046;
+  box-shadow: 0 0 18px -4px rgba(255, 107, 107, 0.5);
+}
+
+.button.primary-action {
+  display: flex;
+  width: 100%;
+  padding: 0.85rem 1.15rem;
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.button.primary-action:hover { background: var(--accent); }
+
+button:focus-visible, .button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.recovery-code {
+  display: block;
+  padding: 0.9rem;
+  margin: 1rem 0;
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+  user-select: all;
+}
 
 .error {
   margin: 0 0 1rem;
