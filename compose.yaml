@@ -2,7 +2,7 @@
 # Niet bedoeld voor Azure, daar draait de image in App Service met een Azure Database for PostgreSQL.
 
 services:
-  database:
+  db:
     # 17 en niet 18, om lokaal te matchen met wat Azure Flexible Server
     # aanbiedt. VERIFIEREN. 
     image: postgres:17
@@ -34,15 +34,24 @@ services:
       timeout: 3s
       retries: 10
 
-  application:
+  app:
     build: ./app
     depends_on:
       # Wachten tot Postgres echt klaar is, niet alleen tot de container
       # bestaat. Anders krijg je bij de eerste start connection refused.
-      database:
+      db:
         condition: service_healthy
+      # En wachten tot de transit engine is ingericht, anders faalt de eerste
+      # versleuteling.
+      vault-init:
+        condition: service_completed_successfully
     environment:
       FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:?zet FLASK_SECRET_KEY in .env}
+      VAULT_ADDR: http://vault:8200
+      # Root token, puur omdat dit dev mode is. In een echte opzet krijgt de
+      # app een AppRole met een policy die alleen transit/encrypt/notes en
+      # transit/decrypt/notes toestaat.
+      VAULT_TOKEN: ${VAULT_TOKEN}
       # Sleutel voor de kolomencryptie van users.totp_secret. Lokaal uit
       # .env, later uit Key Vault (zie get_encryption_key in app.py).
       DB_ENCRYPTION_KEY: ${DB_ENCRYPTION_KEY:?zet DB_ENCRYPTION_KEY in .env}
@@ -62,7 +71,7 @@ services:
     # host 0.0.0.0 is nodig om de app buiten de container te kunnen bereiken.
     # --debug zet ook de Werkzeug-debugger aan, en die kan code uitvoeren:
     # dit hoort uitsluitend lokaal, nooit in Azure.
-    command: flask --app application run --host 0.0.0.0 --port 5000 --debug
+    command: flask --app app run --host 0.0.0.0 --port 5000 --debug
 
 volumes:
   dbdata:
