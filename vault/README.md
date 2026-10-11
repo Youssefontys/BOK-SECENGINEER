@@ -29,6 +29,7 @@ Controleer configuratie en draai de tests:
 ```sh
 docker compose config --quiet
 docker compose exec -T app pip install --user -r requirements-dev.txt
+docker compose cp scripts/vault_init.py app:/tmp/vault_init.py
 docker compose exec -T app python -m pytest tests -v
 ```
 
@@ -48,6 +49,19 @@ Lokaal geverifieerd: 27 unit/routetests, Compose-validatie en een echte Vault-se
 voor encryptie/decryptie, beperkte tokenrechten, herstart en tokenvervanging. De
 complete Docker/PostgreSQL-stack is hier niet uitgevoerd; de integratie- en
 herstarttests staan in de CI-workflow.
+
+Bij het opstarten mag de bootstrap kort wachten op de Vault-API. Fouten tonen
+nu de stap en HTTP-status, zonder tokens of API-bodies te loggen. Herhaalde
+identieke fouten worden maximaal eenmaal per minuut gemeld; retries lopen
+op tot dertig seconden. Zodra de verbinding herstelt, volgt een bevestiging.
+Normale bootstrap-aanvragen hebben tien seconden tijd; initialisatie krijgt
+zestig seconden en de afzonderlijke healthprobe twee seconden.
+
+Blijvende `HTTP 403` wijst op ontbrekende toegang of een ongeldig token;
+verbindingsfouten betekenen dat de API niet bereikt kan worden. Controleer
+dan `docker compose logs --tail=40 vault vault-init` en de containerstatus.
+Herstart na scriptwijzigingen ook `vault-init`, zodat de nieuwe code geladen
+wordt. Verwijder hiervoor geen data- of bootstrap-volumes.
 
 Zie [Vault Transit](https://developer.hashicorp.com/vault/docs/secrets/transit),
 [tokenbeheer](https://developer.hashicorp.com/vault/api-docs/auth/token) en

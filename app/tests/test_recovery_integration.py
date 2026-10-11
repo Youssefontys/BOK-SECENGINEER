@@ -51,7 +51,11 @@ def test_reset_verbruikt_code_vervangt_wachtwoord_en_weigert_oude_sessies(client
     old_session = application.app.test_client()
     log_in_as(old_session, person["id"])
     assert old_session.get("/").status_code == 200
-    assert client.post("/recover", data=reset_data(client, person)).status_code == 302
+    response = client.post("/recover", data=reset_data(client, person), follow_redirects=True)
+    assert response.status_code == 200
+    assert response.request.path == "/login"
+    assert response.history[0].status_code == 303
+    assert "Wachtwoordherstel gelukt" in response.get_data(as_text=True)
     with application.db() as conn, conn.cursor() as cur:
         cur.execute("SELECT password_hash, recovery_code_hash, auth_version FROM users WHERE id = %s", (person["id"],))
         stored, recovery, version = cur.fetchone()
@@ -68,7 +72,7 @@ def test_gelijktijdige_resets_kunnen_code_maar_een_keer_gebruiken(person):
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda pair: pair[0].post("/recover", data=pair[1]).status_code,
                                 zip(clients, requests)))
-    assert sorted(results) == [302, 401]
+    assert sorted(results) == [303, 401]
     with application.db() as conn, conn.cursor() as cur:
         cur.execute("SELECT auth_version FROM users WHERE id = %s", (person["id"],))
         assert cur.fetchone()[0] == 1
@@ -83,7 +87,7 @@ def test_vijf_pogingen_per_account_en_window_reset(client, person):
     with application.db() as conn, conn.cursor() as cur:
         cur.execute("UPDATE recovery_attempts SET window_started = now() - interval '16 minutes' WHERE key = %s",
                     (application.rate_key("recover", "account", person["username"]),))
-    assert client.post("/recover", data=reset_data(client, person)).status_code == 302
+    assert client.post("/recover", data=reset_data(client, person)).status_code == 303
 
 
 def test_ip_limiet_geldt_ook_bij_andere_gebruikersnamen(client, person):
@@ -130,7 +134,7 @@ def test_login_werkt_na_reset_met_nieuwe_totp_en_oude_login_is_ongeldig(client, 
     pending = application.app.test_client()
     token = form_token(pending, "/login")
     assert pending.post("/login", data={"csrf_token": token, "username": person["username"], "password": PASSWORD}).status_code == 302
-    assert client.post("/recover", data=reset_data(client, person)).status_code == 302
+    assert client.post("/recover", data=reset_data(client, person)).status_code == 303
     token = form_token(pending, "/login/2fa")
     assert pending.post("/login/2fa", data={"csrf_token": token, "code": pyotp.TOTP(person["secret"]).now()}).headers["Location"] == "/login"
     token = form_token(client, "/login")

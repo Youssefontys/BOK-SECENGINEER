@@ -46,8 +46,10 @@ jobs:
           echo "App antwoordde niet binnen 60 seconden."
           exit 1
 
-      - name: Testafhankelijkheden installeren
-        run: docker compose exec -T app pip install --user --no-cache-dir -r requirements-dev.txt
+      - name: Tests voorbereiden
+        run: |
+          docker compose exec -T app pip install --user --no-cache-dir -r requirements-dev.txt
+          docker compose cp scripts/vault_init.py app:/tmp/vault_init.py
 
       - name: Tests draaien
         run: docker compose exec -T app python -m pytest tests -v

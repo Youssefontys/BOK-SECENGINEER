@@ -73,7 +73,7 @@ def test_ongeldig_nieuw_wachtwoord_verbruikt_geen_herstelcode(client, recovery, 
 def test_succes_verbruikt_code_hash_wachtwoord_en_trekt_sessies_in(client, recovery):
     data = payload(client, recovery)
     response = client.post("/recover", data=data)
-    assert response.status_code == 302 and response.headers["Location"] == "/login"
+    assert response.status_code == 303 and response.headers["Location"] == "/login"
     update = updates(recovery[0])[0]
     assert "recovery_code_hash = NULL" in update.args[0]
     assert "auth_version = auth_version + 1" in update.args[0]
@@ -83,6 +83,15 @@ def test_succes_verbruikt_code_hash_wachtwoord_en_trekt_sessies_in(client, recov
         assert "user_id" not in session and "pending_user_id" not in session
         assert "recovery_code" not in session
     assert "Je wachtwoord is hersteld" in client.get("/login").get_data(as_text=True)
+
+
+def test_herstelbevestiging_blijft_zichtbaar_na_redirect_en_refresh(client, recovery):
+    response = client.post("/recover", data=payload(client, recovery), follow_redirects=True)
+    assert response.status_code == 200
+    assert response.request.path == "/login"
+    assert response.history[0].status_code == 303
+    assert "Wachtwoordherstel gelukt" in response.get_data(as_text=True)
+    assert "Wachtwoordherstel gelukt" in client.get("/login").get_data(as_text=True)
 
 
 @pytest.mark.parametrize("token", ["", "verkeerd", "\u00e9"])

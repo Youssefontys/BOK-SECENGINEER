@@ -6,7 +6,7 @@
   <h1>Wachtwoord herstellen</h1>
   <p>Gebruik je gebruikersnaam, eenmalige herstelcode en authenticator-code
      om een nieuw wachtwoord in te stellen.</p>
-  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  {% if error %}<p id="auth-feedback" class="error" role="alert" tabindex="-1">{{ error }}</p>{% endif %}
   <form method="post" class="card">
     {% include "_csrf.html" %}
     <label>Gebruikersnaam
@@ -15,18 +15,21 @@
     <label>Eenmalige herstelcode
       <input name="recovery_code" autocomplete="off" maxlength="80" spellcheck="false" required>
     </label>
-    <label>Actuele 2FA-code
-      <input name="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required>
-    </label>
     <label>Nieuw wachtwoord
       <input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
     </label>
     <label>Nieuw wachtwoord herhalen
       <input name="password_confirm" type="password" autocomplete="new-password" minlength="12" maxlength="1024" required>
     </label>
+    <label>Actuele 2FA-code
+      <input name="code" autocomplete="one-time-code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" aria-describedby="fresh-code-hint" required>
+    </label>
+    <p id="fresh-code-hint" class="hint">Vul deze als laatste in en verstuur direct.
+       Gebruik een verse code die je nog niet hebt gebruikt bij het inloggen.</p>
     <button type="submit">Wachtwoord herstellen</button>
   </form>
   <p class="hint">Gebruik een nieuwe code uit je authenticator. Zonder herstelcode
      of toegang tot je authenticator kun je deze herstelroute niet gebruiken.</p>
   <a href="{{ url_for('login') }}">Terug naar inloggen</a>
+  <script src="{{ url_for('static', filename='auth-feedback.js') }}" defer></script>
 {% endblock %}

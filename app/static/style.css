@@ -349,6 +349,19 @@ button:focus-visible, .button:focus-visible {
   font-size: 0.9rem;
 }
 
+.notice.success {
+  margin-bottom: 1.5rem;
+  padding: 1rem 1.2rem;
+  border: 1px solid var(--accent);
+  border-left-width: 4px;
+  border-radius: 10px;
+  background: rgba(53, 224, 192, 0.1);
+}
+
+.notice.success h2 { color: var(--accent); }
+.notice.success p { margin: 0.65rem 0 0; }
+#auth-feedback:focus { outline: 2px solid var(--accent); outline-offset: 3px; }
+
 .hint, small {
   color: var(--muted);
   font-size: 0.84rem;
