@@ -17,6 +17,8 @@ def cursor(monkeypatch):
     connection = MagicMock()
     cursor = connection.__enter__.return_value.cursor.return_value.__enter__.return_value
     monkeypatch.setattr(application, "db", lambda: connection)
+    monkeypatch.setattr(application, "encrypt_note", lambda value: "vault:v1:" + value)
+    monkeypatch.setattr(application, "decrypt_note", lambda value: value.removeprefix("vault:v1:"))
     return cursor
 
 
@@ -38,7 +40,7 @@ def test_bewerken_vereist_volledige_login(client, cursor, method, pending):
 ])
 def test_ongeldige_invoer_wordt_niet_opgeslagen(client, cursor, title, body):
     log_in_as(client, 7)
-    cursor.fetchone.return_value = ("Oud", "Bestaande inhoud")
+    cursor.fetchone.return_value = ("Oud", "Bestaande inhoud", False)
     response = client.post("/notes/12/edit", data={"title": title, "body": body})
     assert response.status_code == 400
     assert cursor.execute.call_count == 1
@@ -46,7 +48,7 @@ def test_ongeldige_invoer_wordt_niet_opgeslagen(client, cursor, title, body):
 
 def test_bewerkformulier_escapet_inhoud_en_behoudt_invoer_bij_fout(client, cursor):
     log_in_as(client, 7)
-    cursor.fetchone.return_value = ('"><script>alert(1)</script>', "</textarea><script>x</script>")
+    cursor.fetchone.return_value = ('"><script>alert(1)</script>', "</textarea><script>x</script>", False)
     page = client.get("/notes/12/edit").get_data(as_text=True)
     assert "<script>" not in page
     assert "&lt;script&gt;" in page
@@ -56,17 +58,40 @@ def test_bewerkformulier_escapet_inhoud_en_behoudt_invoer_bij_fout(client, curso
 
 def test_verdwenen_notitie_tijdens_opslaan_geeft_404(client, cursor):
     log_in_as(client, 7)
-    cursor.fetchone.side_effect = [("Oud", "Inhoud"), None]
+    cursor.fetchone.side_effect = [("Oud", "Inhoud", False), None]
     response = client.post("/notes/12/edit", data={"title": "Nieuw", "body": "Inhoud"})
     assert response.status_code == 404
 
 
 def test_geldige_wijziging_slaat_op_en_keert_terug(client, cursor):
     log_in_as(client, 7)
-    cursor.fetchone.side_effect = [("Oud", "Inhoud"), (12,)]
+    cursor.fetchone.side_effect = [("Oud", "Inhoud", False), (12,)]
     response = client.post(
         "/notes/12/edit", data={"title": " Nieuw ", "body": " Nieuwe inhoud "}
     )
     assert response.status_code == 302
     assert response.headers["Location"] == "/"
-    assert cursor.execute.call_args.args[1] == ("Nieuw", "Nieuwe inhoud", 12, 7)
+    assert cursor.execute.call_args.args[1] == ("vault:v1:Nieuw", "vault:v1:Nieuwe inhoud", 12, 7)
+
+
+def test_bewerkformulier_ontsleutelt_vault_notitie(client, cursor):
+    log_in_as(client, 7)
+    cursor.fetchone.return_value = ("vault:v1:Mijn titel", "vault:v1:Mijn inhoud", True)
+    page = client.get("/notes/12/edit").get_data(as_text=True)
+    assert "Mijn titel" in page
+    assert "Mijn inhoud" in page
+    assert "vault:v1:" not in page
+
+
+def test_vault_storing_slaat_geen_plaintext_op(client, cursor, monkeypatch):
+    log_in_as(client, 7)
+    cursor.fetchone.return_value = ("Oud", "Inhoud", False)
+
+    def unavailable(value):
+        raise application.VaultUnavailable("Gevoelige interne fout")
+
+    monkeypatch.setattr(application, "encrypt_note", unavailable)
+    response = client.post("/notes/12/edit", data={"title": "Nieuw", "body": "Inhoud"})
+    assert response.status_code == 503
+    assert "Gevoelige interne fout" not in response.get_data(as_text=True)
+    assert cursor.execute.call_count == 1

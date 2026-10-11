@@ -1,6 +1,6 @@
 # Week 5 — Authentication
 
-Onderstaande bevindingen zijn gebaseerd op de code in `app/`. De Azure-infrastructuur en de actieve deployment zijn hiervoor niet gecontroleerd.
+Onderstaande bevindingen zijn gebaseerd op de code in `app/` en de lokale Compose/Vault-integratie. De Azure-infrastructuur en de actieve deployment zijn hiervoor niet gecontroleerd.
 
 ### User authentication: wachtwoord + MFA
 
@@ -22,18 +22,26 @@ De applicatie implementeert zelf gebruikersauthenticatie, zonder externe identit
 
 **Nog ontbrekend:** rate limiting/account lockout, het voorkomen van hergebruik van een reeds geaccepteerde TOTP-code, een vervaltijd voor de pending MFA-stap en CSRF-tokens. De registratie bevestigt nog niet dat de authenticator succesvol is ingesteld. TOTP is niet phishingbestendig. Ook kan de snellere afhandeling van onbekende gebruikersnamen accounts via timing verklappen. De encryptiesleutel wordt aan PostgreSQL doorgegeven; externe secretopslag en sleutelrotatie zijn nog niet geïmplementeerd. Deze implementatie is daarom een concept en geen volledig geharde authenticatielaag.
 
-### System authentication: databaseaccount
+### System authentication: databaseaccount en Vault-token
 
 Binnen `app/` is systeemauthenticatie aanwezig in de vorm van een PostgreSQL-account met wachtwoord: `roles.sh` maakt een applicatierol met `LOGIN PASSWORD`, en de applicatie verbindt via `psycopg.connect(DATABASE_URL)`. De connectiestring komt uit de omgeving. Welk account de deployment daadwerkelijk gebruikt en welke PostgreSQL-authenticatiemethode is ingesteld, is hiermee niet vastgesteld.
 
 **Securityvoordeel en beveiliging:** het databaseaccount identificeert de applicatie bij de database. De bijbehorende autorisatie volgt least privilege: de rol krijgt toegang tot het schema, CRUD-rechten op `users` en `notes` en benodigde sequencerechten, maar geen eigenaarschap of rechten om tabellen aan te maken. Dit beperkt de impact van misbruik van het applicatieaccount. Het wachtwoord en de connectiestring moeten als secrets worden beheerd; de code haalt de connectiestring uit de omgeving.
 
-**Niet aangetoond binnen `app/`:** clientcertificaten, mTLS, OAuth/OIDC, service tokens of managed identity. De app dwingt ook geen TLS-modus of certificaatcontrole voor de databaseverbinding af; dat hangt af van `DATABASE_URL` en de serverconfiguratie. `Secure` op sessiecookies regelt cookievervoer en bewijst geen systeemauthenticatie of HTTPS-configuratie van de deployment.
+Daarnaast authenticeert de app zich bij **HashiCorp Vault** met een servicetoken in de `X-Vault-Token`-header. De lokale bootstrap-service maakt een afzonderlijk, periodiek token met alleen `update` op `transit/encrypt/notes` en `transit/decrypt/notes`. Het token wordt vernieuwd en via een read-only volume aan de non-root app beschikbaar gesteld. De app leest het tokenbestand opnieuw bij iedere aanvraag, zodat tokenvervanging geen app-restart vereist. De app krijgt geen root-token, unseal-key of encryptiesleutel, en mag geen sleutels uitlezen, roteren of engines beheren.
+
+**Securityvoordeel:** een databaselek onthult bij nieuwe of gemigreerde notities alleen ciphertext voor titel en inhoud. Encryptie en decryptie gebeuren in Vault Transit; de AES-256-GCM-sleutel verlaat Vault niet. Misbruik van het applicatietoken blijft beperkt tot encryptie/decryptie met de notitiesleutel. Het token kan nog steeds alle ciphertext onder die sleutel ontsleutelen; eigendomscontrole gebeurt in de app.
+
+**Beperkingen van de lokale/CI-opzet:** Vault heeft geen hostpoort, maar gebruikt HTTP binnen het Compose-netwerk. Root-token en unseal-key staan in een afzonderlijk bootstrap-volume voor automatisch unsealen; de app kan dit volume niet lezen. Dit is ontwikkelgemak en geen productiegeschikte secretscheiding bij toegang tot de Docker-host. Productie vereist TLS, apart beheerde unseal-secrets en workload-authenticatie/tokenbeheer. De TOTP-geheimen blijven voorlopig via PostgreSQL `pgcrypto` beveiligd.
+
+**Niet geïmplementeerd in deze app-opzet:** clientcertificaten, mTLS, OAuth/OIDC of managed identity. De app dwingt ook geen TLS-modus of certificaatcontrole voor de databaseverbinding af; dat hangt af van `DATABASE_URL` en de serverconfiguratie. `Secure` op sessiecookies regelt cookievervoer en bewijst geen systeemauthenticatie of HTTPS-configuratie van de deployment.
 
 ### Notities aanpassen
 
 Naast aanmaken en verwijderen kunnen gebruikers via **Aanpassen** de titel en inhoud van eigen notities wijzigen. `GET /notes/<id>/edit` toont de bestaande inhoud; `POST` valideert en slaat wijzigingen op. Zowel de leesquery als de update controleert `id` én `user_id`. Een ontbrekende notitie of een notitie van een ander geeft dezelfde 404-reactie. De invoerregels zijn gelijk aan die bij aanmaken; bij een validatiefout blijft de ingevoerde tekst behouden. Jinja escaping en de bestaande CSP beschermen de weergave tegen scriptinjectie. CSRF-bescherming blijft een open punt voor alle mutaties.
 
-Bronnen: `app/app.py`, `app/schema.sql`, `app/roles.sh` en `app/templates/`.
+Bronnen: `app/app.py`, `app/vault_crypto.py`, `app/schema.sql`, `app/roles.sh`, `app/templates/`, `compose.yaml` en `scripts/vault_init.py`. Achtergrond: [Vault Transit](https://developer.hashicorp.com/vault/docs/secrets/transit) en [Vault-tokenbeheer](https://developer.hashicorp.com/vault/api-docs/auth/token).
 
-Verificatie: de bewerkroute en bestaande securityheaders zijn lokaal getest met `python -m pytest app/tests/test_edit_note.py app/tests/test_securityheaders.py -q` (15 tests geslaagd). Deze routetests gebruiken een database-double. De aanvullende eigendomstests in `app/tests/test_autorisatie.py` vereisen een ingerichte PostgreSQL-testdatabase met `pgcrypto` en zijn in deze omgeving niet uitgevoerd. Voor de tests moeten `FLASK_SECRET_KEY`, `DATABASE_URL` en `DB_ENCRYPTION_KEY` zijn ingesteld; gebruik hiervoor testwaarden en een aparte testdatabase.
+Verificatie: de bewerkroute, Vault-client en bestaande securityheaders zijn lokaal getest met `python -m pytest app/tests/test_edit_note.py app/tests/test_vault_crypto.py app/tests/test_securityheaders.py -q` (27 tests geslaagd). Deze tests gebruiken doubles voor externe systemen. De aanvullende tests in `app/tests/test_autorisatie.py` en `app/tests/test_vault_integration.py` gebruiken PostgreSQL en Vault en worden door CI uitgevoerd. Voor lokale integratietests moet de Compose-stack draaien. De complete Docker-stack is in deze Windows-omgeving niet uitgevoerd; Docker is hier niet beschikbaar.
+
+Aanvullend is de Compose-configuratie succesvol gecontroleerd met Docker Compose 2.39.2. Met een echte Vault 1.21.0-server zijn bootstrap, encryptie/decryptie, weigering van beheerrechten, sleutelbehoud na herstart en vervanging van een ingetrokken applicatietoken getest. De CI-workflow bevat ook een herstartcontrole voor bestaande ciphertext.
