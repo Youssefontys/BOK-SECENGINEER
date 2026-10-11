@@ -28,6 +28,9 @@ jobs:
             echo "DB_ENCRYPTION_KEY=$(openssl rand -hex 32)"
           } > .env
 
+      - name: Compose-configuratie controleren
+        run: docker compose config --quiet
+
       - name: Image bouwen en stack starten
         run: docker compose up -d --build
 
@@ -44,10 +47,10 @@ jobs:
           exit 1
 
       - name: Testafhankelijkheden installeren
-        run: docker compose exec -T web pip install --no-cache-dir -r requirements-dev.txt
+        run: docker compose exec -T app pip install --user --no-cache-dir -r requirements-dev.txt
 
       - name: Tests draaien
-        run: docker compose exec -T web python -m pytest tests -v
+        run: docker compose exec -T app python -m pytest tests -v
 
       - name: Logs tonen bij een mislukte run
         if: failure()
