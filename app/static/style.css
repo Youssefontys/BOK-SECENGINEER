@@ -127,6 +127,10 @@ h1::before {
 
 h2 { margin: 0 0 0.35rem; font-size: 1.02rem; }
 
+a { color: var(--accent); }
+
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
 .card {
   background: linear-gradient(180deg, var(--surface), #0f1721);
   border: 1px solid var(--border);
@@ -211,6 +215,7 @@ button.secondary:hover { color: var(--text); box-shadow: none; }
 
 .note-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Notitie aanpassen{% endblock %}
+
+{% block content %}
+  <header class="bar">
+    <h1>Notitie aanpassen</h1>
+    <a href="{{ url_for('notes') }}">Annuleren</a>
+  </header>
+
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+
+  <form method="post" class="card">
+    <label>Titel
+      <input name="title" maxlength="120" required value="{{ title }}">
+    </label>
+    <label>Notitie
+      <textarea name="body" maxlength="4000" required>{{ body }}</textarea>
+    </label>
+    <button type="submit">Wijzigingen opslaan</button>
+  </form>
+{% endblock %}

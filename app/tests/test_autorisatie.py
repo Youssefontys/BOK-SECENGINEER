@@ -54,3 +54,31 @@ def test_gebruiker_kan_zijn_eigen_notitie_wel_verwijderen(client, twee_gebruiker
         aantal = cur.fetchone()[0]
 
     assert aantal == 0, "eigen notitie kon niet verwijderd worden"
+
+
+def test_gebruiker_kan_notitie_van_een_ander_niet_aanpassen(client, twee_gebruikers):
+    note_id = twee_gebruikers["test_gebruiker_a_notitie"]
+    log_in_as(client, twee_gebruikers["test_gebruiker_b"])
+    assert client.get(f"/notes/{note_id}/edit").status_code == 404
+    response = client.post(
+        f"/notes/{note_id}/edit", data={"title": "gewijzigd", "body": "gewijzigd"}
+    )
+    assert response.status_code == 404
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn, conn.cursor() as cur:
+        cur.execute("SELECT title, body FROM notes WHERE id = %s", (note_id,))
+        assert cur.fetchone() == ("notitie van test_gebruiker_a", "inhoud")
+
+
+def test_gebruiker_kan_zijn_eigen_notitie_aanpassen(client, twee_gebruikers):
+    note_id = twee_gebruikers["test_gebruiker_b_notitie"]
+    log_in_as(client, twee_gebruikers["test_gebruiker_b"])
+    page = client.get(f"/notes/{note_id}/edit")
+    assert page.status_code == 200
+    assert "notitie van test_gebruiker_b" in page.get_data(as_text=True)
+    response = client.post(
+        f"/notes/{note_id}/edit", data={"title": "Nieuwe titel", "body": "Nieuwe inhoud"}
+    )
+    assert response.status_code == 302
+    with psycopg.connect(os.environ["DATABASE_URL"]) as conn, conn.cursor() as cur:
+        cur.execute("SELECT title, body FROM notes WHERE id = %s", (note_id,))
+        assert cur.fetchone() == ("Nieuwe titel", "Nieuwe inhoud")

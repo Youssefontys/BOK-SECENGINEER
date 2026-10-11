@@ -18,7 +18,7 @@ import qrcode
 import qrcode.image.svg
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHash, VerificationError
-from flask import Flask, redirect, render_template, request, session, url_for
+from flask import Flask, abort, redirect, render_template, request, session, url_for
 
 app = Flask(__name__)
 
@@ -281,15 +281,7 @@ def notes():
         # wegfilteren. Een notitie met <script> erin is geldige inhoud; die
         # wordt veilig gemaakt bij het weergeven (escaping plus CSP), niet
         # bij het opslaan.
-        error = None
-        if not (1 <= len(title) <= MAX_TITLE):
-            error = f"Titel is verplicht en maximaal {MAX_TITLE} tekens."
-        elif not (1 <= len(body) <= MAX_BODY):
-            error = f"Notitie is verplicht en maximaal {MAX_BODY} tekens."
-        elif has_disallowed_control_chars(title):
-            error = "Titel mag geen regeleindes of andere controletekens bevatten."
-        elif has_disallowed_control_chars(body, allow_newlines=True):
-            error = "Notitie bevat ongeldige controletekens."
+        error = validate_note(title, body)
 
         if error:
             return render_template(
@@ -314,6 +306,59 @@ def notes():
         notes=fetch_notes(user_id),
         just_logged_in=session.pop("just_logged_in", False),
     )
+
+
+def validate_note(title: str, body: str):
+    """Dezelfde invoerregels voor aanmaken en aanpassen."""
+    if not (1 <= len(title) <= MAX_TITLE):
+        return f"Titel is verplicht en maximaal {MAX_TITLE} tekens."
+    if not (1 <= len(body) <= MAX_BODY):
+        return f"Notitie is verplicht en maximaal {MAX_BODY} tekens."
+    if has_disallowed_control_chars(title):
+        return "Titel mag geen regeleindes of andere controletekens bevatten."
+    if has_disallowed_control_chars(body, allow_newlines=True):
+        return "Notitie bevat ongeldige controletekens."
+    return None
+
+
+@app.route("/notes/<int:note_id>/edit", methods=["GET", "POST"])
+def edit_note(note_id: int):
+    user_id = session.get("user_id")
+    if user_id is None:
+        return redirect(url_for("login"))
+
+    with db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT title, body FROM notes WHERE id = %s AND user_id = %s",
+            (note_id, user_id),
+        )
+        note = cur.fetchone()
+    # Dezelfde reactie voor een ontbrekende notitie en die van een ander.
+    if note is None:
+        abort(404)
+
+    title, body = note
+    if request.method == "POST":
+        title = request.form.get("title", "").strip()
+        body = request.form.get("body", "").strip()
+        error = validate_note(title, body)
+        if error:
+            return render_template(
+                "edit_note.html", title=title, body=body, error=error
+            ), 400
+
+        with db() as conn, conn.cursor() as cur:
+            # Controleer het eigendom ook bij de mutatie zelf.
+            cur.execute(
+                "UPDATE notes SET title = %s, body = %s"
+                " WHERE id = %s AND user_id = %s RETURNING id",
+                (title, body, note_id, user_id),
+            )
+            if cur.fetchone() is None:
+                abort(404)
+        return redirect(url_for("notes"))
+
+    return render_template("edit_note.html", title=title, body=body)
 
 
 def fetch_notes(user_id: int):
