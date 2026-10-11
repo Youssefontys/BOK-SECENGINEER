@@ -28,6 +28,9 @@ jobs:
             echo "DB_ENCRYPTION_KEY=$(openssl rand -hex 32)"
           } > .env
 
+      - name: Compose-configuratie controleren
+        run: docker compose config --quiet
+
       - name: Image bouwen en stack starten
         run: docker compose up -d --build
 
@@ -44,10 +47,24 @@ jobs:
           exit 1
 
       - name: Testafhankelijkheden installeren
-        run: docker compose exec -T web pip install --no-cache-dir -r requirements-dev.txt
+        run: docker compose exec -T app pip install --user --no-cache-dir -r requirements-dev.txt
 
       - name: Tests draaien
-        run: docker compose exec -T web python -m pytest tests -v
+        run: docker compose exec -T app python -m pytest tests -v
+
+      - name: Vault-sleutels na herstart controleren
+        run: |
+          docker compose exec -T app python tests/vault_restart_probe.py save
+          docker compose restart vault
+          for poging in $(seq 1 30); do
+            if docker compose exec -T app python tests/vault_restart_probe.py check; then
+              echo "Bestaande ciphertext blijft leesbaar na Vault-herstart."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Vault-herstartcontrole mislukt."
+          exit 1
 
       - name: Logs tonen bij een mislukte run
         if: failure()

@@ -11,6 +11,7 @@ import os
 import psycopg
 
 from conftest import log_in_as
+from vault_crypto import decrypt_note
 
 
 def test_gebruiker_ziet_notities_van_een_ander_niet(client, twee_gebruikers):
@@ -80,5 +81,8 @@ def test_gebruiker_kan_zijn_eigen_notitie_aanpassen(client, twee_gebruikers):
     )
     assert response.status_code == 302
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn, conn.cursor() as cur:
-        cur.execute("SELECT title, body FROM notes WHERE id = %s", (note_id,))
-        assert cur.fetchone() == ("Nieuwe titel", "Nieuwe inhoud")
+        cur.execute("SELECT title, body, encrypted FROM notes WHERE id = %s", (note_id,))
+        title, body, encrypted = cur.fetchone()
+        assert encrypted is True
+        assert title.startswith("vault:v") and body.startswith("vault:v")
+        assert (decrypt_note(title), decrypt_note(body)) == ("Nieuwe titel", "Nieuwe inhoud")

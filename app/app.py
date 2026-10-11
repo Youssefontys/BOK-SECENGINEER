@@ -19,6 +19,7 @@ import qrcode.image.svg
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHash, VerificationError
 from flask import Flask, abort, redirect, render_template, request, session, url_for
+from vault_crypto import VaultUnavailable, decrypt_note, encrypt_note
 
 app = Flask(__name__)
 
@@ -52,6 +53,24 @@ MAX_BODY = 4000
 def db():
     """Nieuwe databaseverbinding. Nog geen connection pooling in dit concept."""
     return psycopg.connect(DATABASE_URL)
+
+
+@app.errorhandler(VaultUnavailable)
+def vault_unavailable(error):
+    # Geen API-errors met secrets teruggeven, en nooit plaintext opslaan als fallback.
+    return "Notities zijn tijdelijk niet beschikbaar. Probeer het later opnieuw.", 503
+
+
+@app.cli.command("encrypt-notes")
+def encrypt_existing_notes():
+    """Bestaande plaintext-notities transactioneel naar Vault omzetten."""
+    with db() as conn, conn.cursor() as cur:
+        cur.execute("SELECT id, title, body FROM notes WHERE NOT encrypted FOR UPDATE")
+        for note_id, title, body in cur.fetchall():
+            cur.execute(
+                "UPDATE notes SET title = %s, body = %s, encrypted = TRUE WHERE id = %s",
+                (encrypt_note(title), encrypt_note(body), note_id),
+            )
 
 
 def get_encryption_key() -> str:
@@ -294,8 +313,8 @@ def notes():
 
         with db() as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO notes (user_id, title, body) VALUES (%s, %s, %s)",
-                (user_id, title, body),
+                "INSERT INTO notes (user_id, title, body, encrypted) VALUES (%s, %s, %s, TRUE)",
+                (user_id, encrypt_note(title), encrypt_note(body)),
             )
         return redirect(url_for("notes"))
 
@@ -329,7 +348,7 @@ def edit_note(note_id: int):
 
     with db() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT title, body FROM notes WHERE id = %s AND user_id = %s",
+            "SELECT title, body, encrypted FROM notes WHERE id = %s AND user_id = %s",
             (note_id, user_id),
         )
         note = cur.fetchone()
@@ -337,7 +356,9 @@ def edit_note(note_id: int):
     if note is None:
         abort(404)
 
-    title, body = note
+    title, body, encrypted = note
+    if encrypted:
+        title, body = decrypt_note(title), decrypt_note(body)
     if request.method == "POST":
         title = request.form.get("title", "").strip()
         body = request.form.get("body", "").strip()
@@ -350,9 +371,9 @@ def edit_note(note_id: int):
         with db() as conn, conn.cursor() as cur:
             # Controleer het eigendom ook bij de mutatie zelf.
             cur.execute(
-                "UPDATE notes SET title = %s, body = %s"
+                "UPDATE notes SET title = %s, body = %s, encrypted = TRUE"
                 " WHERE id = %s AND user_id = %s RETURNING id",
-                (title, body, note_id, user_id),
+                (encrypt_note(title), encrypt_note(body), note_id, user_id),
             )
             if cur.fetchone() is None:
                 abort(404)
@@ -371,11 +392,16 @@ def fetch_notes(user_id: int):
         #   tests/test_autorisatie.py::test_gebruiker_ziet_notities_van_een_ander_niet
         # Die hoort dan rood te worden. Daarna meteen terugzetten.
         cur.execute(
-            "SELECT id, title, body, created_at FROM notes"
+            "SELECT id, title, body, created_at, encrypted FROM notes"
             " WHERE user_id = %s ORDER BY created_at DESC",
             (user_id,),
         )
-        return cur.fetchall()
+        rows = cur.fetchall()
+    return [
+        (note_id, decrypt_note(title) if encrypted else title,
+         decrypt_note(body) if encrypted else body, created_at)
+        for note_id, title, body, created_at, encrypted in rows
+    ]
 
 
 @app.route("/notes/<int:note_id>/delete", methods=["POST"])

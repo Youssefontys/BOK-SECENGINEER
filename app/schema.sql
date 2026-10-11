@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS notes (
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title      TEXT NOT NULL,
     body       TEXT NOT NULL,
+    encrypted  BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
