@@ -490,6 +490,23 @@ def login_2fa():
 
     code = request.form.get("code", "").strip()
 
+    # De limiet hangt aan het account en niet aan deze sessie. Een sessie is
+    # een cookie die de aanvaller zelf bezit: hij kan een nieuwe aanmaken door
+    # opnieuw met het wachtwoord in te loggen, of een oude cookie terugsturen
+    # en zo een teller in de cookie steeds op nul zetten. Een teller in de
+    # database kan hij niet resetten.
+    ip = ratelimit.client_bucket(request.remote_addr)
+    account_key = rate_key("twofa_account", "account", str(user_id))
+    ip_key = rate_key("twofa_ip", "ip", ip)
+    keys = [account_key, ip_key]
+
+    # Goedkope eerste controle, vóór de gebruikersrij vergrendeld wordt.
+    with db() as conn, conn.cursor() as cur:
+        wait = ratelimit.blocked_seconds(cur, keys)
+    if wait:
+        log_security_event("twofa_blocked", warn=True, ip=request.remote_addr, user_id=user_id, retry_after=wait)
+        return throttled_response("twofactor.html", wait)
+
     with db() as conn, conn.cursor() as cur:
         # Ontsleutelen gebeurt in de database, want daar staat de versleutelde
         # kolom. De applicatie krijgt de leesbare secret terug.
@@ -502,10 +519,43 @@ def login_2fa():
         if row is None or row[1] != session.get("pending_auth_version"):
             session.clear()
             return redirect(url_for("login"))
+
+        # Tweede controle, nu mét het rijslot. Gelijktijdige verzoeken voor
+        # hetzelfde account wachten hier op elkaar, dus wie doorkomt ziet de
+        # blokkade die een eerder verzoek net heeft gezet. Zonder deze tweede
+        # controle passeren alle parallelle verzoeken de eerste, en kan een
+        # aanvaller met veel gelijktijdige gokken ver boven de limiet komen.
+        #
+        # MUTATIETEST (voor de bewijsvoering): haal dit blok tijdelijk weg en
+        # draai tests/test_twofa_throttle.py::test_tweede_controle_onder_het_rijslot_ziet_een_blokkade_die_net_gezet_is
+        # Die is deterministisch en hoort dan rood te worden. De test
+        # test_parallelle_gokken_overschrijden_de_limiet_niet is het
+        # realistische scenario maar kan door timing toevallig slagen.
+        # Daarna meteen terugzetten.
+        wait = ratelimit.blocked_seconds(cur, keys)
+        if wait:
+            log_security_event("twofa_blocked", warn=True, ip=request.remote_addr, user_id=user_id, retry_after=wait)
+            return throttled_response("twofactor.html", wait)
+
         step = matching_totp_step(row[0], code, row[2])
         if step is None:
+            outcomes = {
+                "twofa_account": ratelimit.record_failure(cur, "twofa_account", account_key),
+                "twofa_ip": ratelimit.record_failure(cur, "twofa_ip", ip_key),
+            }
+            ratelimit.purge_stale(cur)
+            log_security_event("twofa_failed", ip=request.remote_addr, user_id=user_id)
+            for scope, outcome in outcomes.items():
+                if outcome.locked_for:
+                    log_security_event(
+                        "lockout_started", warn=True, scope=scope, ip=request.remote_addr,
+                        user_id=user_id, retry_after=outcome.locked_for,
+                    )
             return render_template("twofactor.html", error="Ongeldige of al gebruikte code. Wacht op een nieuwe code."), 401
         cur.execute("UPDATE users SET last_totp_step = %s WHERE id = %s", (step, user_id))
+        # Alleen de teller van het account; zie de wachtwoordstap voor waarom
+        # de IP-teller blijft staan.
+        ratelimit.reset(cur, account_key)
 
     # Nieuwe sessie-inhoud na het voltooien van de login, zodat de
     # pending-status niet blijft staan.
