@@ -101,8 +101,8 @@ def test_gebruiker_kan_zijn_eigen_notitie_aanpassen(client, twee_gebruikers):
     )
     assert response.status_code == 302
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn, conn.cursor() as cur:
-        cur.execute("SELECT title, body, encrypted FROM notes WHERE id = %s", (note_id,))
-        title, body, encrypted = cur.fetchone()
-        assert encrypted is True
+        cur.execute("SELECT title, body, encrypted, bound, user_id FROM notes WHERE id = %s", (note_id,))
+        title, body, encrypted, bound, owner = cur.fetchone()
+        assert encrypted is True and bound is True
         assert title.startswith("vault:v") and body.startswith("vault:v")
-        assert (decrypt_note(title), decrypt_note(body)) == ("Nieuwe titel", "Nieuwe inhoud")
+        assert (decrypt_note(title, owner), decrypt_note(body, owner)) == ("Nieuwe titel", "Nieuwe inhoud")

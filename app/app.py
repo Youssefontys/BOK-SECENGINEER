@@ -27,7 +27,7 @@ import ratelimit
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHash, VerificationError
 from flask import Flask, abort, make_response, redirect, render_template, request, session, url_for
-from vault_crypto import VaultUnavailable, decrypt_note, encrypt_note
+from vault_crypto import CiphertextRejected, VaultUnavailable, decrypt_legacy_note, decrypt_note, encrypt_note
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
@@ -245,14 +245,28 @@ def vault_unavailable(error):
 
 @app.cli.command("encrypt-notes")
 def encrypt_existing_notes():
-    """Bestaande plaintext-notities transactioneel naar Vault omzetten."""
+    """Zet elke notitie die nog niet aan zijn eigenaar gebonden is om.
+
+    Dat zijn plaintext-notities (van voor Vault) en notities met de oude
+    sleutel zonder context. Het draait bij elke start en is idempotent: een
+    notitie die al gebonden is wordt niet aangeraakt.
+    """
     with db() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id, title, body FROM notes WHERE NOT encrypted FOR UPDATE")
-        for note_id, title, body in cur.fetchall():
+        cur.execute("SELECT id, user_id, title, body, encrypted FROM notes WHERE NOT bound FOR UPDATE")
+        for note_id, owner_id, title, body, encrypted in cur.fetchall():
+            if encrypted:
+                title, body = decrypt_legacy_note(title), decrypt_legacy_note(body)
             cur.execute(
-                "UPDATE notes SET title = %s, body = %s, encrypted = TRUE WHERE id = %s",
-                (encrypt_note(title), encrypt_note(body), note_id),
+                "UPDATE notes SET title = %s, body = %s, encrypted = TRUE, bound = TRUE WHERE id = %s",
+                (encrypt_note(title, owner_id), encrypt_note(body, owner_id), note_id),
             )
+
+
+def read_note_text(user_id, stored, encrypted, bound):
+    """De leesbare tekst van een opgeslagen waarde, afhankelijk van hoe hij is bewaard."""
+    if not encrypted:
+        return stored
+    return decrypt_note(stored, user_id) if bound else decrypt_legacy_note(stored)
 
 
 def get_encryption_key() -> str:
@@ -756,7 +770,7 @@ def notes():
             ), 400
 
         # Eerst versleutelen en pas daarna het slot nemen, zodat het slot kort is.
-        stored_title, stored_body = encrypt_note(title), encrypt_note(body)
+        stored_title, stored_body = encrypt_note(title, user_id), encrypt_note(body, user_id)
         with db() as conn, conn.cursor() as cur:
             # Rijslot op de gebruiker, en pas daarna tellen. Gelijktijdige
             # aanmaakverzoeken van hetzelfde account wachten hier op elkaar.
@@ -772,7 +786,7 @@ def notes():
             full = cur.fetchone()[0] >= MAX_NOTES_PER_USER
             if not full:
                 cur.execute(
-                    "INSERT INTO notes (user_id, title, body, encrypted) VALUES (%s, %s, %s, TRUE)",
+                    "INSERT INTO notes (user_id, title, body, encrypted, bound) VALUES (%s, %s, %s, TRUE, TRUE)",
                     (user_id, stored_title, stored_body),
                 )
         if full:
@@ -815,7 +829,7 @@ def edit_note(note_id: int):
 
     with db() as conn, conn.cursor() as cur:
         cur.execute(
-            "SELECT title, body, encrypted FROM notes WHERE id = %s AND user_id = %s",
+            "SELECT title, body, encrypted, bound FROM notes WHERE id = %s AND user_id = %s",
             (note_id, user_id),
         )
         note = cur.fetchone()
@@ -823,7 +837,7 @@ def edit_note(note_id: int):
     if note is None:
         abort(404)
 
-    stored_title, stored_body, encrypted = note
+    stored_title, stored_body, encrypted, bound = note
     if request.method == "POST":
         title = request.form.get("title", "").strip()
         body = request.form.get("body", "").strip()
@@ -836,9 +850,9 @@ def edit_note(note_id: int):
         with db() as conn, conn.cursor() as cur:
             # Controleer het eigendom ook bij de mutatie zelf.
             cur.execute(
-                "UPDATE notes SET title = %s, body = %s, encrypted = TRUE"
+                "UPDATE notes SET title = %s, body = %s, encrypted = TRUE, bound = TRUE"
                 " WHERE id = %s AND user_id = %s RETURNING id",
-                (encrypt_note(title), encrypt_note(body), note_id, user_id),
+                (encrypt_note(title, user_id), encrypt_note(body, user_id), note_id, user_id),
             )
             if cur.fetchone() is None:
                 abort(404)
@@ -847,10 +861,12 @@ def edit_note(note_id: int):
     # Alleen bij tonen ontsleutelen: bij opslaan komt de nieuwe tekst uit het
     # formulier en zou ontsleutelen van de oude tekst twee Vault-aanroepen
     # kosten waar niets mee gebeurt.
-    if encrypted:
-        title, body = decrypt_note(stored_title), decrypt_note(stored_body)
-    else:
-        title, body = stored_title, stored_body
+    try:
+        title = read_note_text(user_id, stored_title, encrypted, bound)
+        body = read_note_text(user_id, stored_body, encrypted, bound)
+    except CiphertextRejected:
+        log_security_event("note_ciphertext_rejected", warn=True, user_id=user_id, note_id=note_id)
+        abort(404)
     return render_template("edit_note.html", title=title, body=body)
 
 
@@ -864,16 +880,23 @@ def fetch_notes(user_id: int):
         #   tests/test_autorisatie.py::test_gebruiker_ziet_notities_van_een_ander_niet
         # Die hoort dan rood te worden. Daarna meteen terugzetten.
         cur.execute(
-            "SELECT id, title, body, created_at, encrypted FROM notes"
+            "SELECT id, title, body, created_at, encrypted, bound FROM notes"
             " WHERE user_id = %s ORDER BY created_at DESC",
             (user_id,),
         )
         rows = cur.fetchall()
-    return [
-        (note_id, decrypt_note(title) if encrypted else title,
-         decrypt_note(body) if encrypted else body, created_at)
-        for note_id, title, body, created_at, encrypted in rows
-    ]
+    notes = []
+    for note_id, title, body, created_at, encrypted, bound in rows:
+        try:
+            title = read_note_text(user_id, title, encrypted, bound)
+            body = read_note_text(user_id, body, encrypted, bound)
+        except CiphertextRejected:
+            # Een rij die niet bij deze eigenaar hoort of is aangepast. Een
+            # melding bij die ene notitie, zodat de rest zichtbaar blijft.
+            log_security_event("note_ciphertext_rejected", warn=True, user_id=user_id, note_id=note_id)
+            title, body = "[Deze notitie kan niet worden ontsleuteld]", ""
+        notes.append((note_id, title, body, created_at))
+    return notes
 
 
 @app.route("/notes/<int:note_id>/delete", methods=["POST"])
