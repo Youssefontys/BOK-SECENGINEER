@@ -748,9 +748,7 @@ def edit_note(note_id: int):
     if note is None:
         abort(404)
 
-    title, body, encrypted = note
-    if encrypted:
-        title, body = decrypt_note(title), decrypt_note(body)
+    stored_title, stored_body, encrypted = note
     if request.method == "POST":
         title = request.form.get("title", "").strip()
         body = request.form.get("body", "").strip()
@@ -771,6 +769,13 @@ def edit_note(note_id: int):
                 abort(404)
         return redirect(url_for("notes"))
 
+    # Alleen bij tonen ontsleutelen: bij opslaan komt de nieuwe tekst uit het
+    # formulier en zou ontsleutelen van de oude tekst twee Vault-aanroepen
+    # kosten waar niets mee gebeurt.
+    if encrypted:
+        title, body = decrypt_note(stored_title), decrypt_note(stored_body)
+    else:
+        title, body = stored_title, stored_body
     return render_template("edit_note.html", title=title, body=body)
 
 
@@ -817,13 +822,6 @@ def delete_note(note_id: int):
             "DELETE FROM notes WHERE id = %s AND user_id = %s", (note_id, user_id)
         )
     return redirect(url_for("notes"))
-
-
-if __name__ == "__main__":
-    # Alleen voor lokaal testen. De ingebouwde Flask-server is expliciet niet
-    # bedoeld voor productie; in Azure draait dit achter een echte WSGI-server
-    # (gunicorn) in de container.
-    app.run(host="127.0.0.1", port=5000, debug=True)
 
 
 # ---------------------------------------------------------------------------
