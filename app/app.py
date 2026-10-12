@@ -17,6 +17,7 @@ import re
 import secrets
 import time
 import unicodedata
+from datetime import timedelta
 
 import psycopg
 import pyotp
@@ -69,6 +70,15 @@ app.config.update(
     SESSION_COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "true").lower() == "true",
     # Beperkt dat de cookie meegaat bij cross-site requests (CSRF).
     SESSION_COOKIE_SAMESITE="Lax",
+    # Flask bewaart de sessie in de cookie zelf, ondertekend. Hoe lang zo'n
+    # cookie geldig is bepaalt deze waarde, ook voor sessies die niet
+    # "permanent" zijn. Zonder instelling is dat 31 dagen: een gekopieerde
+    # cookie bleef een maand werken, ook na uitloggen.
+    #
+    # MUTATIETEST (voor de bewijsvoering): haal deze regel tijdelijk weg en
+    # draai tests/test_sessie.py::test_een_cookie_ouder_dan_de_levensduur_wordt_geweigerd
+    # Die hoort dan rood te worden. Daarna meteen terugzetten.
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
     MAX_CONTENT_LENGTH=64 * 1024,
 )
 
@@ -684,6 +694,19 @@ def profile():
 
 @app.route("/logout", methods=["POST"])
 def logout():
+    user_id = session.get("user_id")
+    if user_id is not None:
+        # De cookie wissen haalt alleen jouw kopie weg: wie een kopie heeft,
+        # blijft binnen. Door de sessieversie te verhogen wordt elke bestaande
+        # cookie van dit account ongeldig (zie is_session_current). Neveneffect,
+        # bewust: uitloggen logt ook op andere apparaten uit.
+        #
+        # MUTATIETEST (voor de bewijsvoering): haal dit UPDATE-blok tijdelijk
+        # weg en draai
+        # tests/test_sessie.py::test_een_gekopieerde_cookie_werkt_niet_meer_na_uitloggen
+        # Die hoort dan rood te worden. Daarna meteen terugzetten.
+        with db() as conn, conn.cursor() as cur:
+            cur.execute("UPDATE users SET auth_version = auth_version + 1 WHERE id = %s", (user_id,))
     session.clear()
     return redirect(url_for("login"))
 
