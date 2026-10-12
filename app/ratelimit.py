@@ -53,6 +53,17 @@ ACCOUNT_POLICIES = {
     # DoS-hefboom zijn voor een buitenstaander, want je bereikt deze stap
     # alleen met het juiste wachtwoord. Plafond 24 uur.
     "twofa_account": Policy(5, 900, 900, 86400),
+
+    # Wachtwoordherstel met herstelcode. Hier is de gebruikersnaam het enige
+    # wat een aanvaller hoeft te kennen, dus per account blokkeren (een
+    # zelfde afweging als bij twofa_account, maar zonder wachtwoordstap
+    # ervoor). Elke poging telt, een geslaagd herstel wist de teller.
+    "recover_account": Policy(5, 900, 900, 86400),
+
+    # Een ingelogde gebruiker die een nieuwe herstelcode aanvraagt moet
+    # wachtwoord en TOTP-code geven. Alleen bereikbaar met een sessie, dus
+    # geen DoS-hefboom voor een buitenstaander.
+    "issue_recovery_account": Policy(5, 900, 900, 86400),
 }
 
 # Limieten die aan een IP-adres hangen. Het probleem met IP-limieten is een
@@ -71,6 +82,7 @@ IP_POLICIES = {
         # gebruikersnaam die al bestaat wordt gemeld: zonder limiet is dit
         # een gratis manier om accounts op te sporen en de server te belasten.
         "register_ip": Policy(10, 3600, 3600, 14400),
+        "recover_ip": Policy(20, 900, 900, 3600),
     },
     # Voor een omgeving met veel gebruikers achter één adres, zoals een
     # klaslokaal tijdens de hacking week. Ruimere drempels en een vaste,
@@ -80,6 +92,7 @@ IP_POLICIES = {
         "login_ip": Policy(100, 900, 300, 300),
         "twofa_ip": Policy(100, 900, 300, 300),
         "register_ip": Policy(30, 3600, 300, 300),
+        "recover_ip": Policy(100, 900, 300, 300),
     },
     # Alleen tellen en melden, nooit op IP blokkeren. Het risico: niets stopt
     # nog een aanvaller die massaal verschillende accounts probeert, en elke
@@ -89,6 +102,7 @@ IP_POLICIES = {
         "login_ip": Policy(20, 900, 0, 0, enforce=False),
         "twofa_ip": Policy(20, 900, 0, 0, enforce=False),
         "register_ip": Policy(10, 3600, 0, 0, enforce=False),
+        "recover_ip": Policy(20, 900, 0, 0, enforce=False),
     },
 }
 

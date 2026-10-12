@@ -57,7 +57,7 @@ Mislukte pogingen worden geteld en leiden tot een tijdelijke blokkade. De teller
 - Registratie verraadt of een gebruikersnaam al bestaat. Zonder tweede kanaal zoals e-mail is dat bij zelfgekozen gebruikersnamen niet te vermijden; de limiet maakt het opsporen alleen traag en het logt.
 - In de wachtwoordstap kan een handvol gelijktijdige verzoeken de limiet licht overschrijden, omdat daar geen rijslot is. Het kan niet meer zijn dan het aantal verzoeken dat tegelijk binnenkomt.
 - Dit beschermt niet tegen volumetrische aanvallen op netwerk- of transportniveau; dat is een taak voor de WAF/edge.
-- Het herstelformulier gebruikt nog de oudere teller (`recovery_attempts`) en niet deze module.
+- Het herstelformulier (`/recover`) en het aanvragen van een nieuwe herstelcode gebruiken dezelfde module: per account 5 pogingen per 15 minuten met blokkade (plafond 24 uur), plus een IP-limiet die met `THROTTLE_IP_MODE` meebeweegt. De oude tabel `recovery_attempts` is vervallen (migratie 004).
 
 Bronnen: `app/ratelimit.py`, `app/app.py`, `app/tests/test_ratelimit.py`, `test_login_throttle.py`, `test_twofa_throttle.py` en `test_register_throttle.py`.
 

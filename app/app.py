@@ -173,29 +173,6 @@ def rate_key(scope, kind, value):
     return hmac.new(app.secret_key.encode(), f"{scope}:{kind}:{value}".encode(), hashlib.sha256).hexdigest()
 
 
-def allow_recovery_attempt(scope, account):
-    """Gedeelde PostgreSQL-limiet, dus ook effectief met meerdere workers."""
-    keys = [(rate_key(scope, "ip", request.remote_addr or "unknown"), 20),
-            (rate_key(scope, "account", account), 5)]
-    with db() as conn, conn.cursor() as cur:
-        for key, maximum in keys:
-            cur.execute(
-                "INSERT INTO recovery_attempts (key, attempts, window_started) VALUES (%s, 1, now())"
-                " ON CONFLICT (key) DO UPDATE SET"
-                " attempts = CASE WHEN recovery_attempts.window_started < now() - interval '15 minutes'"
-                " THEN 1 ELSE recovery_attempts.attempts + 1 END,"
-                " window_started = CASE WHEN recovery_attempts.window_started < now() - interval '15 minutes'"
-                " THEN now() ELSE recovery_attempts.window_started END RETURNING attempts", (key,)
-            )
-            if cur.fetchone()[0] > maximum:
-                return False
-        cur.execute(
-            "DELETE FROM recovery_attempts WHERE key IN (SELECT key FROM recovery_attempts"
-            " WHERE window_started < now() - interval '1 day' LIMIT 100 FOR UPDATE SKIP LOCKED)"
-        )
-    return True
-
-
 def db():
     """Nieuwe databaseverbinding. Nog geen connection pooling in dit concept."""
     return psycopg.connect(DATABASE_URL)
@@ -238,16 +215,22 @@ def log_throttle_outcomes(outcomes, **context):
             log_security_event("threshold_crossed", warn=True, scope=scope, **context)
 
 
-def throttled_response(template, wait_seconds, subject="mislukte pogingen"):
+def throttled_response(template, wait_seconds, subject="mislukte pogingen", **context):
     """Antwoord bij een blokkade: 429 met Retry-After.
 
     De melding is voor iedereen hetzelfde, dus ook voor een gebruikersnaam die
     niet bestaat: een blokkade mag niet verraden of het account bestaat.
+    `context` geeft de pagina mee wat ze nodig heeft om het formulier opnieuw
+    te tonen (bijvoorbeeld de ingevoerde gebruikersnaam).
     """
     minutes = max(1, -(-wait_seconds // 60))
     unit = "minuut" if minutes == 1 else "minuten"
     response = make_response(
-        render_template(template, error=f"Te veel {subject}. Probeer het over {minutes} {unit} opnieuw."),
+        render_template(
+            template,
+            error=f"Te veel {subject}. Probeer het over {minutes} {unit} opnieuw.",
+            **context,
+        ),
         429,
     )
     response.headers["Retry-After"] = str(wait_seconds)
@@ -621,8 +604,31 @@ def recover():
     if request.method == "GET":
         return render_template("recover.html")
     username = request.form.get("username", "").strip()
-    if not allow_recovery_attempt("recover", username):
-        return render_template("recover.html", error="Te veel pogingen. Probeer het over 15 minuten opnieuw.", username=username), 429
+
+    # Dezelfde limiet als bij het inloggen, uit dezelfde module. Eerst de
+    # blokkade controleren, dan de poging tellen. Elke poging telt, ook een
+    # onjuiste invoer: bij herstel is er geen "geldige invoer" die goedkoop te
+    # onderscheiden is van een gok. Een geslaagd herstel wist de teller van het
+    # account (de code is dan toch verbruikt).
+    ip = ratelimit.client_bucket(request.remote_addr)
+    ip_key = rate_key("recover_ip", "ip", ip)
+    account_key = rate_key("recover_account", "account", username.lower()[:64])
+    with db() as conn, conn.cursor() as cur:
+        wait = ratelimit.blocked_seconds(cur, [ip_key, account_key])
+    if wait:
+        log_security_event(
+            "recover_blocked", warn=True, ip=request.remote_addr,
+            username=loggable_username(username), retry_after=wait,
+        )
+        return throttled_response("recover.html", wait, subject="herstelpogingen", username=username)
+    with db() as conn, conn.cursor() as cur:
+        outcomes = {
+            "recover_ip": ratelimit.record_failure(cur, "recover_ip", ip_key),
+            "recover_account": ratelimit.record_failure(cur, "recover_account", account_key),
+        }
+        ratelimit.purge_stale(cur)
+    log_throttle_outcomes(outcomes, ip=request.remote_addr, username=loggable_username(username))
+
     password = request.form.get("password", "")
     if not 12 <= len(password) <= 1024 or password != request.form.get("password_confirm", ""):
         return render_template("recover.html", error="Kies twee keer hetzelfde wachtwoord van 12 tot 1024 tekens.", username=username), 400
@@ -645,6 +651,7 @@ def recover():
             " auth_version = auth_version + 1, last_totp_step = %s WHERE id = %s",
             (ph.hash(password), step, row[0]),
         )
+        ratelimit.reset(cur, account_key)
     session.clear()
     session["password_reset"] = True
     return redirect(url_for("login"), code=303)
@@ -657,8 +664,18 @@ def issue_recovery_code():
         return redirect(url_for("login"))
     if request.method == "GET":
         return render_template("recovery_code.html")
-    if not allow_recovery_attempt("issue-recovery", str(user_id)):
-        return render_template("recovery_code.html", error="Te veel pogingen. Probeer het over 15 minuten opnieuw."), 429
+    # Alleen een limiet per account, geen IP-limiet: dit kan alleen wie al is
+    # ingelogd, en de limiet per account dekt het raden van wachtwoord en code.
+    account_key = rate_key("issue_recovery_account", "account", str(user_id))
+    with db() as conn, conn.cursor() as cur:
+        wait = ratelimit.blocked_seconds(cur, [account_key])
+    if wait:
+        log_security_event("recovery_code_blocked", warn=True, ip=request.remote_addr, user_id=user_id, retry_after=wait)
+        return throttled_response("recovery_code.html", wait, subject="pogingen")
+    with db() as conn, conn.cursor() as cur:
+        outcomes = {"issue_recovery_account": ratelimit.record_failure(cur, "issue_recovery_account", account_key)}
+        ratelimit.purge_stale(cur)
+    log_throttle_outcomes(outcomes, ip=request.remote_addr, user_id=user_id)
     with db() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT password_hash, pgp_sym_decrypt(totp_secret, %s), last_totp_step, auth_version"
@@ -675,6 +692,7 @@ def issue_recovery_code():
         recovery_code, recovery_hash = generate_recovery_code()
         cur.execute("UPDATE users SET recovery_code_hash = %s, last_totp_step = %s WHERE id = %s",
                     (recovery_hash, step, user_id))
+        ratelimit.reset(cur, account_key)
     return render_template("recovery_code.html", recovery_code=recovery_code)
 
 

@@ -30,15 +30,14 @@ def person():
             (username, application.ph.hash(PASSWORD), secret, application.get_encryption_key(), hashed),
         )
         user_id = cur.fetchone()[0]
-        keys = [application.rate_key("recover", "account", username),
-                application.rate_key("recover", "ip", "127.0.0.1"),
-                application.rate_key("issue-recovery", "account", str(user_id)),
-                application.rate_key("issue-recovery", "ip", "127.0.0.1")]
-        cur.execute("DELETE FROM recovery_attempts WHERE key = ANY(%s)", (keys,))
+        keys = [application.rate_key("recover_account", "account", username),
+                application.rate_key("recover_ip", "ip", "127.0.0.1"),
+                application.rate_key("issue_recovery_account", "account", str(user_id))]
+        cur.execute("DELETE FROM auth_throttle WHERE key = ANY(%s)", (keys,))
     yield {"username": username, "id": user_id, "code": code, "secret": secret}
     with application.db() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM users WHERE id = %s", (user_id,))
-        cur.execute("DELETE FROM recovery_attempts WHERE key = ANY(%s)", (keys,))
+        cur.execute("DELETE FROM auth_throttle WHERE key = ANY(%s)", (keys,))
 
 
 def reset_data(client, person):
@@ -85,15 +84,15 @@ def test_vijf_pogingen_per_account_en_window_reset(client, person):
         assert client.post("/recover", data=data).status_code == 401
     assert client.post("/recover", data=reset_data(client, person)).status_code == 429
     with application.db() as conn, conn.cursor() as cur:
-        cur.execute("UPDATE recovery_attempts SET window_started = now() - interval '16 minutes' WHERE key = %s",
-                    (application.rate_key("recover", "account", person["username"]),))
+        cur.execute("UPDATE auth_throttle SET locked_until = now() - interval '1 second' WHERE key = %s",
+                    (application.rate_key("recover_account", "account", person["username"]),))
     assert client.post("/recover", data=reset_data(client, person)).status_code == 303
 
 
 def test_ip_limiet_geldt_ook_bij_andere_gebruikersnamen(client, person):
     with application.db() as conn, conn.cursor() as cur:
-        cur.execute("INSERT INTO recovery_attempts (key, attempts) VALUES (%s, 20)",
-                    (application.rate_key("recover", "ip", "127.0.0.1"),))
+        cur.execute("INSERT INTO auth_throttle (key, failures, locked_until) VALUES (%s, 0, now() + interval '10 minutes')",
+                    (application.rate_key("recover_ip", "ip", "127.0.0.1"),))
     data = reset_data(client, person)
     data["username"] = "andere_gebruikersnaam"
     assert client.post("/recover", data=data).status_code == 429
