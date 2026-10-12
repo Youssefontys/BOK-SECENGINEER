@@ -112,6 +112,13 @@ services:
       # Lokaal draait dit op http, dus de Secure-vlag op de sessiecookie moet
       # uit. In Azure staat deze op true.
       COOKIE_SECURE: "false"
+      # Aantal proxies tussen internet en de app waarvan X-Forwarded-For
+      # vertrouwd wordt, voor de IP-limiet bij inloggen. Lokaal geen proxy,
+      # dus 0 en wordt de header genegeerd. Achter Application Gateway en
+      # App Service moet dit het werkelijke aantal zijn: te laag en iedereen
+      # deelt het IP van de proxy, te hoog en een aanvaller kan zijn eigen
+      # adres opgeven.
+      TRUSTED_PROXY_HOPS: "0"
     ports:
       - "127.0.0.1:5000:5000"
     volumes:

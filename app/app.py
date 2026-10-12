@@ -10,6 +10,8 @@ import base64
 import hashlib
 import hmac
 import io
+import json
+import logging
 import os
 import re
 import secrets
@@ -20,12 +22,39 @@ import psycopg
 import pyotp
 import qrcode
 import qrcode.image.svg
+import ratelimit
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHash, VerificationError
-from flask import Flask, abort, redirect, render_template, request, session, url_for
+from flask import Flask, abort, make_response, redirect, render_template, request, session, url_for
 from vault_crypto import VaultUnavailable, decrypt_note, encrypt_note
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 app = Flask(__name__)
+
+# Beveiligingsgebeurtenissen (mislukte logins, blokkades) gaan als JSON-regels
+# naar de standaarduitvoer van de container, zie log_security_event().
+app.logger.setLevel(logging.INFO)
+
+
+def apply_proxy_config(flask_app, hops):
+    """Vertrouw het client-adres uit X-Forwarded-For, maar alleen via echte proxies.
+
+    Zonder deze instelling is request.remote_addr achter een load balancer het
+    adres van die balancer, en delen alle gebruikers één IP-limiet. Met een te
+    ruime instelling kan een aanvaller zelf een X-Forwarded-For meesturen en
+    daarmee bij elke poging een ander adres opgeven, en is de IP-limiet
+    waardeloos. ProxyFix pakt daarom het adres dat de laatste `hops` proxies
+    zelf hebben toegevoegd (van rechts geteld) en negeert wat eronder staat.
+
+    hops = 0 betekent: geen proxy, header negeren. Dat is de standaard, en
+    klopt lokaal. Achter Application Gateway en App Service moet het aantal
+    proxies tussen internet en de app hier staan.
+    """
+    if hops > 0:
+        flask_app.wsgi_app = ProxyFix(flask_app.wsgi_app, x_for=hops)
+
+
+apply_proxy_config(app, int(os.environ.get("TRUSTED_PROXY_HOPS", "0")))
 
 # Sleutel waarmee sessiecookies worden ondertekend. Uit de omgeving, nooit
 # uit de code: anders staat hij in git en kan iedereen die de repo leest
@@ -51,6 +80,10 @@ DATABASE_URL = os.environ["DATABASE_URL"]
 ph = PasswordHasher()
 
 USERNAME_PATTERN = re.compile(r"[a-z0-9_]{3,32}")
+# Bovengrens voor wat we aan Argon2 voeren. Het formulier mag tot 64 KB zijn;
+# zonder deze grens kan een aanvaller de server wachtwoorden van tienduizenden
+# tekens laten hashen.
+MAX_PASSWORD_LENGTH = 1024
 MAX_TITLE = 120
 MAX_BODY = 4000
 DUMMY_RECOVERY_HASH = ph.hash(secrets.token_hex(24))
@@ -145,6 +178,44 @@ def allow_recovery_attempt(scope, account):
 def db():
     """Nieuwe databaseverbinding. Nog geen connection pooling in dit concept."""
     return psycopg.connect(DATABASE_URL)
+
+
+def loggable_username(username):
+    """De naam alleen loggen als hij op een echte gebruikersnaam lijkt.
+
+    Wat een aanvaller intypt kan van alles zijn. Alleen een geldige vorm
+    (a-z, 0-9, _) gaat het log in; de rest wordt None, zodat er nooit
+    onverwachte tekens in een logregel belanden.
+    """
+    return username if USERNAME_PATTERN.fullmatch(username) else None
+
+
+def log_security_event(event, *, warn=False, **fields):
+    """Eén JSON-regel per beveiligingsgebeurtenis.
+
+    JSON-encoding escapet regeleindes en andere controletekens, dus invoer met
+    een regeleinde kan geen valse logregel injecteren. Wachtwoorden en
+    codes komen hier nooit in. Let op: IP-adres en gebruikersnaam zijn
+    persoonsgegevens, dus voor deze logs hoort een bewaartermijn en een doel.
+    """
+    line = json.dumps({"event": event, **fields}, sort_keys=True)
+    (app.logger.warning if warn else app.logger.info)(line)
+
+
+def throttled_response(template, wait_seconds):
+    """Antwoord bij een blokkade: 429 met Retry-After.
+
+    De melding is voor iedereen hetzelfde, dus ook voor een gebruikersnaam die
+    niet bestaat: een blokkade mag niet verraden of het account bestaat.
+    """
+    minutes = max(1, -(-wait_seconds // 60))
+    unit = "minuut" if minutes == 1 else "minuten"
+    response = make_response(
+        render_template(template, error=f"Te veel mislukte pogingen. Probeer het over {minutes} {unit} opnieuw."),
+        429,
+    )
+    response.headers["Retry-After"] = str(wait_seconds)
+    return response
 
 
 @app.errorhandler(VaultUnavailable)
@@ -320,17 +391,83 @@ def login():
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
 
+    # De limieten gelden op wat er wordt ingevoerd en niet op of het account
+    # bestaat. Daardoor gedraagt een onbekende gebruikersnaam zich exact als
+    # een bekende, en verraadt een blokkade niets over welke accounts er zijn.
+    ip = ratelimit.client_bucket(request.remote_addr)
+    name = username.lower()[:64]
+    ip_key = rate_key("login_ip", "ip", ip)
+    pair_key = rate_key("login_pair", "account-ip", f"{name}|{ip}")
+    account_key = rate_key("login_account", "account", name)
+
+    # Eerst de blokkade controleren, vóór er iets duurs gebeurt. Een
+    # geblokkeerd verzoek kost de server één kleine databasequery en geen
+    # Argon2-berekening; anders zou juist de blokkade een manier zijn om
+    # de CPU leeg te trekken.
     with db() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT id, password_hash, auth_version FROM users WHERE username = %s", (username,)
+        wait = ratelimit.blocked_seconds(cur, [ip_key, pair_key])
+    if wait:
+        log_security_event(
+            "login_blocked", warn=True, ip=request.remote_addr,
+            username=loggable_username(username), retry_after=wait,
         )
-        row = cur.fetchone()
+        return throttled_response("login.html", wait)
+
+    row = None
+    verified = False
+    # Een gebruikersnaam die niet aan de vorm voldoet kan niet bestaan, en een
+    # wachtwoord boven de grens kan nooit zijn aangemaakt: die gaan niet naar
+    # Argon2, maar tellen wel als mislukking.
+    if len(password) <= MAX_PASSWORD_LENGTH and USERNAME_PATTERN.fullmatch(username):
+        with db() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, password_hash, auth_version FROM users WHERE username = %s", (username,)
+            )
+            row = cur.fetchone()
+        # Altijd precies één Argon2-verificatie, ook als de gebruiker niet
+        # bestaat (dan tegen een dummy-hash). Anders is een onbekende
+        # gebruikersnaam meetbaar sneller en lekt de timing welke accounts
+        # er zijn.
+        matches = password_matches(row[1] if row else DUMMY_RECOVERY_HASH, password)
+        verified = matches and row is not None
 
     # Eén generieke melding voor "gebruiker bestaat niet" en "wachtwoord is
     # fout". Onderscheid maken verklapt welke accounts bestaan (user
     # enumeration) en maakt een aanval gerichter.
-    if row is None or not password_matches(row[1], password):
+    if not verified:
+        with db() as conn, conn.cursor() as cur:
+            outcomes = {
+                "login_ip": ratelimit.record_failure(cur, "login_ip", ip_key),
+                "login_pair": ratelimit.record_failure(cur, "login_pair", pair_key),
+                "login_account": ratelimit.record_failure(cur, "login_account", account_key),
+            }
+            ratelimit.purge_stale(cur)
+        log_security_event(
+            "login_failed", ip=request.remote_addr, username=loggable_username(username)
+        )
+        for scope, outcome in outcomes.items():
+            if outcome.locked_for:
+                log_security_event(
+                    "lockout_started", warn=True, scope=scope, ip=request.remote_addr,
+                    username=loggable_username(username), retry_after=outcome.locked_for,
+                )
+            if outcome.threshold_crossed:
+                log_security_event(
+                    "distributed_guessing_suspected", warn=True, scope=scope,
+                    username=loggable_username(username),
+                )
         return render_template("login.html", error="Onjuiste gebruikersnaam of wachtwoord."), 401
+
+    # Alleen de teller van dit account wissen, nooit die van het IP-adres:
+    # anders kan een aanvaller met één eigen account zijn IP-teller steeds
+    # terugzetten door tussendoor even in te loggen.
+    #
+    # MUTATIETEST (voor de bewijsvoering): voeg hier tijdelijk een tweede
+    # ratelimit.reset(cur, ip_key) toe en draai
+    #   tests/test_login_throttle.py::test_geslaagde_login_wist_de_accountteller_maar_niet_de_ip_teller
+    # Die hoort dan rood te worden. Daarna meteen weer weghalen.
+    with db() as conn, conn.cursor() as cur:
+        ratelimit.reset(cur, pair_key)
 
     # Nog niet ingelogd: dat gebeurt pas na de tweede factor. Daarom een
     # aparte sessiesleutel, zodat een halve login nergens toegang geeft.
