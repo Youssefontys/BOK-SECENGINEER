@@ -268,3 +268,13 @@ def test_blokkade_en_start_ervan_worden_als_waarschuwing_gelogd(client, account,
     namen = {w["event"] for w in waarschuwingen}
     assert {"lockout_started", "login_blocked"} <= namen
     assert any(w.get("scope") == "login_pair" for w in waarschuwingen if w["event"] == "lockout_started")
+
+
+def test_vrijgesteld_demoaccount_wordt_niet_op_account_en_ip_geblokkeerd(client, monkeypatch):
+    """Het demoaccount blijft bereikbaar voor een klasgenoot op hetzelfde IP, een ander account niet."""
+    monkeypatch.setattr(application, "PAIR_EXEMPT_USERS", {"hackingweek"})
+    demo = "HackingWeek"  # hoofdletters tellen niet mee
+    gewoon = "gewoon_" + secrets.token_hex(4)
+
+    assert set(fouten(client, demo, 8)) == {401}
+    assert 429 in fouten(client, gewoon, 8)

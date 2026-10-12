@@ -94,6 +94,9 @@ USERNAME_PATTERN = re.compile(r"[a-z0-9_]{3,32}")
 # zonder deze grens kan een aanvaller de server wachtwoorden van tienduizenden
 # tekens laten hashen.
 MAX_PASSWORD_LENGTH = 1024
+# Gebruikersnamen (kleine letters, komma-gescheiden) die niet onder de blokkade
+# per account en IP vallen, bedoeld voor het demoaccount in de hacking week.
+PAIR_EXEMPT_USERS = {n.strip().lower() for n in os.environ.get("THROTTLE_PAIR_EXEMPT_USERS", "").split(",") if n.strip()}
 MAX_TITLE = 120
 MAX_BODY = 4000
 # Zonder grens kan één account duizenden notities aanmaken. Elke notitie kost
@@ -460,13 +463,19 @@ def login():
     ip_key = rate_key("login_ip", "ip", ip)
     pair_key = rate_key("login_pair", "account-ip", f"{name}|{ip}")
     account_key = rate_key("login_account", "account", name)
+    # Het demoaccount (THROTTLE_PAIR_EXEMPT_USERS) valt niet onder de blokkade
+    # per account en IP, anders kan iemand op hetzelfde netwerk het met vijf
+    # foute pogingen buitensluiten. De IP-limiet en de 2FA-limiet blijven wel
+    # gelden, dus raden blijft begrensd.
+    pair_exempt = name in PAIR_EXEMPT_USERS
+    blocking_keys = [ip_key] if pair_exempt else [ip_key, pair_key]
 
     # Eerst de blokkade controleren, vóór er iets duurs gebeurt. Een
     # geblokkeerd verzoek kost de server één kleine databasequery en geen
     # Argon2-berekening; anders zou juist de blokkade een manier zijn om
     # de CPU leeg te trekken.
     with db() as conn, conn.cursor() as cur:
-        wait = ratelimit.blocked_seconds(cur, [ip_key, pair_key])
+        wait = ratelimit.blocked_seconds(cur, blocking_keys)
     if wait:
         log_security_event(
             "login_blocked", warn=True, ip=request.remote_addr,
@@ -499,7 +508,7 @@ def login():
         with db() as conn, conn.cursor() as cur:
             outcomes = {
                 "login_ip": ratelimit.record_failure(cur, "login_ip", ip_key),
-                "login_pair": ratelimit.record_failure(cur, "login_pair", pair_key),
+                **({} if pair_exempt else {"login_pair": ratelimit.record_failure(cur, "login_pair", pair_key)}),
                 "login_account": ratelimit.record_failure(cur, "login_account", account_key),
             }
             ratelimit.purge_stale(cur)

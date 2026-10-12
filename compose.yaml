@@ -125,6 +125,7 @@ services:
       # limieten per account zijn in alle standen gelijk. Zie IP_POLICIES in
       # ratelimit.py. Een onbekende waarde laat de app niet starten.
       THROTTLE_IP_MODE: ${THROTTLE_IP_MODE:-strict}
+      THROTTLE_PAIR_EXEMPT_USERS: ${THROTTLE_PAIR_EXEMPT_USERS:-}
     ports:
       - "127.0.0.1:5000:5000"
     volumes:
