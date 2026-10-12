@@ -353,6 +353,18 @@ def register():
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
 
+    # Eerst de blokkade, vóór er iets gebeurt. Registreren is duur (twee
+    # Argon2-berekeningen) en verraadt of een gebruikersnaam al bestaat, dus
+    # zonder limiet is het een gratis manier om accounts op te sporen en de
+    # server te belasten.
+    ip = ratelimit.client_bucket(request.remote_addr)
+    ip_key = rate_key("register_ip", "ip", ip)
+    with db() as conn, conn.cursor() as cur:
+        wait = ratelimit.blocked_seconds(cur, [ip_key])
+    if wait:
+        log_security_event("register_blocked", warn=True, ip=request.remote_addr, retry_after=wait)
+        return throttled_response("register.html", wait, subject="registratiepogingen")
+
     # Inputvalidatie op basis van een whitelist: alleen wat expliciet is
     # toegestaan komt door. Een blacklist van "gevaarlijke" tekens is altijd
     # incompleet.
@@ -368,6 +380,14 @@ def register():
         return render_template(
             "register.html", error="Wachtwoord moet 12 tot 1024 tekens zijn."
         ), 400
+
+    # Pas hier tellen, en niet bij elke POST: vanaf dit punt volgt het dure
+    # werk, en een tikfout in het formulier hoort geen poging te kosten.
+    # Ongeldige invoer is goedkoop (een patroonvergelijking) en onthult niets.
+    with db() as conn, conn.cursor() as cur:
+        outcomes = {"register_ip": ratelimit.record_failure(cur, "register_ip", ip_key)}
+        ratelimit.purge_stale(cur)
+    log_throttle_outcomes(outcomes, ip=request.remote_addr)
 
     totp_secret = pyotp.random_base32()
     recovery_code, recovery_hash = generate_recovery_code()
@@ -385,9 +405,17 @@ def register():
                 (username, ph.hash(password), totp_secret, get_encryption_key(), recovery_hash),
             )
     except psycopg.errors.UniqueViolation:
+        # Dit verraadt dat een gebruikersnaam bestaat, en dat is bij zelfgekozen
+        # gebruikersnamen zonder tweede kanaal (e-mail) niet te vermijden: de
+        # nieuwe gebruiker moet het weten. De mitigatie is de limiet hierboven,
+        # die het aantal vragen per IP beperkt, en dit logbericht, waarmee
+        # opsporen achteraf zichtbaar is.
+        log_security_event("register_username_taken", ip=request.remote_addr, username=username)
         return render_template(
             "register.html", error="Die gebruikersnaam is al in gebruik."
         ), 409
+
+    log_security_event("account_created", ip=request.remote_addr, username=username)
 
     # De secret wordt één keer getoond zodat je hem in een authenticator-app
     # kunt zetten. Daarna staat hij alleen nog in de database.
