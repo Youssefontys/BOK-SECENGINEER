@@ -68,6 +68,26 @@ jobs:
           echo "Vault-herstartcontrole mislukt."
           exit 1
 
+      - name: Image starten zoals in productie
+        # De stappen hierboven draaien met de dev-server en de bronmap als
+        # bind-mount, dus ze testen de bronbestanden en niet de image. Hier
+        # start dezelfde app zonder die twee overrides: gunicorn uit de
+        # Dockerfile, met alleen de code die in de image zit.
+        run: |
+          docker compose -f compose.yaml -f compose.image-smoke.yaml up -d --force-recreate app
+          for poging in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5000/login > /dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:5000/login > /dev/null
+          docker compose exec -T app sh -c 'tr "\0" " " < /proc/1/cmdline' | grep -q gunicorn
+          # Alleen het tokenvolume mag erin gemount zijn, geen bronmap.
+          mounts=$(docker inspect "$(docker compose ps -q app)" --format '{{range .Mounts}}{{.Destination}} {{end}}')
+          echo "Mounts: $mounts"
+          [ "$mounts" = "/run/vault " ]
+
       - name: Logs tonen bij een mislukte run
         if: failure()
         run: docker compose logs
