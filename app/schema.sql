@@ -1,7 +1,14 @@
--- Notitie-app, databaseschema.
+-- Notitie-app, beginschema.
 -- Draait als de eigenaar van de database (POSTGRES_USER uit compose), niet
 -- als de applicatierol. De applicatierol en zijn rechten worden daarna
 -- gezet door 02-roles.sh.
+--
+-- Dit bestand bevat alleen het begin: de tabellen users en notes zoals ze
+-- waren voordat er migraties bestonden. Alles wat daarna kwam staat ALLEEN in
+-- migrations/ (kolommen, extra tabellen, hun rechten). db-migrate draait die
+-- bij elke start, op een nieuw volume en op een bestaand volume, dus er is
+-- maar één plek per wijziging. Stond dezelfde definitie ook hier, dan kon een
+-- nieuw volume ongemerkt anders zijn dan een bestaand.
 
 -- pgcrypto levert pgp_sym_encrypt/pgp_sym_decrypt voor kolomencryptie.
 -- Let op: lokaal mag de eigenaar dit zelf aanzetten omdat pgcrypto een
@@ -15,9 +22,6 @@ CREATE TABLE IF NOT EXISTS users (
     -- Alleen de Argon2-hash, nooit het wachtwoord zelf. De hash bevat de
     -- salt en de parameters al, dus die hoeven niet in een eigen kolom.
     password_hash TEXT NOT NULL,
-    recovery_code_hash TEXT,
-    auth_version BIGINT NOT NULL DEFAULT 0,
-    last_totp_step BIGINT,
     -- Een TOTP-secret is een credential, net als een wachtwoord, maar moet
     -- leesbaar blijven om codes te kunnen verifieren: hashen kan dus niet,
     -- versleutelen wel. Daarom bytea en niet text: hier staat de uitvoer
@@ -41,15 +45,7 @@ CREATE TABLE IF NOT EXISTS notes (
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     title      TEXT NOT NULL,
     body       TEXT NOT NULL,
-    encrypted  BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_notes_user_id ON notes(user_id);
-
-CREATE TABLE IF NOT EXISTS recovery_attempts (
-    key TEXT PRIMARY KEY,
-    attempts INTEGER NOT NULL,
-    window_started TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_recovery_attempts_window ON recovery_attempts(window_started);

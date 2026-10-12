@@ -1,0 +1,13 @@
+# Alleen voor de CI-stap "Image starten zoals in productie".
+#
+# compose.yaml zet de dev-server en de bronmap (bind-mount) over de image heen,
+# waardoor een fout in de Dockerfile of in gunicorn nooit zichtbaar wordt. Dit
+# bestand haalt beide weg, zodat de app start precies zoals de gebouwde image
+# bedoeld is: gunicorn uit de Dockerfile, met alleen de code die erin zit.
+#
+#   docker compose -f compose.yaml -f compose.image-smoke.yaml up -d --force-recreate app
+services:
+  app:
+    command: !reset null
+    volumes: !override
+      - vaulttoken:/run/vault:ro

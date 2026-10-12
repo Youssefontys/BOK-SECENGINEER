@@ -20,6 +20,8 @@ STATE = Path("/bootstrap-state/init.json")
 TOKEN = Path("/app-token/token")
 POLICY = '''path "transit/encrypt/notes" { capabilities = ["update"] }
 path "transit/decrypt/notes" { capabilities = ["update"] }
+path "transit/encrypt/notes-bound" { capabilities = ["update"] }
+path "transit/decrypt/notes-bound" { capabilities = ["update"] }
 '''
 
 
@@ -75,6 +77,10 @@ def configure(root):
         request("sys/mounts/transit", {"type": "transit"}, root)
     # Idempotent: bestaande key-versies blijven behouden.
     request("transit/keys/notes", {"type": "aes256-gcm96"}, root)
+    # De sleutel waarmee nieuwe notities gebonden worden aan hun eigenaar. Een
+    # `derived` sleutel kan niet achteraf op een bestaande sleutel gezet
+    # worden; daarom een tweede sleutel en `rewrap-notes` voor de oude notities.
+    request("transit/keys/notes-bound", {"type": "aes256-gcm96", "derived": True}, root)
     request("sys/policies/acl/notes-app", {"policy": POLICY}, root, method="PUT")
 
 

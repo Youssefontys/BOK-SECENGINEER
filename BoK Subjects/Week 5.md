@@ -22,7 +22,45 @@ De applicatie implementeert zelf gebruikersauthenticatie, zonder externe identit
 
 TOTP-verificatie bewaart het laatst gebruikte tijdsinterval in de database en accepteert het niet opnieuw. De pending MFA-stap vervalt na tien minuten. Authenticatie- en herstelformulieren hebben CSRF-tokens. Een sessieversie wordt bij iedere geauthenticeerde aanvraag gecontroleerd, zodat wachtwoordherstel bestaande sessies en pending logins ongeldig maakt.
 
-**Nog ontbrekend:** rate limiting/account lockout voor gewone login en login/2FA, en CSRF-tokens voor notitiemutaties en uitloggen. De registratie bevestigt nog niet dat de authenticator succesvol is ingesteld. TOTP is niet phishingbestendig. Ook kan de snellere afhandeling van onbekende gebruikersnamen accounts via timing verklappen. De encryptiesleutel voor TOTP wordt aan PostgreSQL doorgegeven; externe secretopslag en sleutelrotatie hiervoor zijn nog niet geïmplementeerd. Deze implementatie is daarom een concept en geen volledig geharde authenticatielaag.
+**Nog ontbrekend:** CSRF-tokens voor notitiemutaties en uitloggen. De registratie bevestigt nog niet dat de authenticator succesvol is ingesteld. TOTP is niet phishingbestendig. De encryptiesleutel voor TOTP wordt aan PostgreSQL doorgegeven; externe secretopslag en sleutelrotatie hiervoor zijn nog niet geïmplementeerd. Deze implementatie is daarom een concept en geen volledig geharde authenticatielaag. Beperkingen van de poginglimieten staan in de volgende sectie.
+
+### Inlogpogingen beperken
+
+Mislukte pogingen worden geteld en leiden tot een tijdelijke blokkade. De tellers staan in PostgreSQL (`auth_throttle`) en gelden dus over workers en instanties heen; een teller in het geheugen zou een aanvaller zijn pogingen laten verdelen over de twee gunicorn-workers. De sleutels zijn HMAC's van IP, account of de combinatie, dus er staan geen leesbare IP-adressen of gebruikersnamen in de tabel. De logica staat in `app/ratelimit.py`.
+
+| Stap | Limiet | Blokkade |
+|---|---|---|
+| Wachtwoord, per IP | 20 fouten per 15 min | 15 min, verdubbelt bij herhaling tot 1 uur |
+| Wachtwoord, per account vanaf één IP | 5 fouten per 15 min | idem |
+| Wachtwoord, per account over alle IP's | 30 fouten per uur | geen: alleen een waarschuwing in het log |
+| Tweede factor, per account | 5 fouten per 15 min | 15 min, verdubbelt tot 24 uur; ook de juiste code wordt dan geweigerd |
+| Tweede factor, per IP | 20 fouten per 15 min | 15 min, verdubbelt tot 1 uur |
+| Registratie, per IP | 10 pogingen per uur (alleen bij geldige invoer) | 1 uur, verdubbelt tot 4 uur |
+
+**Keuzes en waarom:**
+
+- Een account wordt vanuit de wachtwoordstap **niet** geblokkeerd. Anders kan iedereen die een gebruikersnaam kent dat account vergrendelen. De bescherming tegen verspreid raden is daar de tweede factor plus de IP-limiet. In de tweede-factorstap wordt het account wél geblokkeerd: die stap bereik je alleen met het juiste wachtwoord, dus het is geen hefboom voor een buitenstaander.
+- De tweede-factorlimiet hangt aan het account, niet aan de sessie. Een sessie is een cookie die de aanvaller zelf bezit; hij kan een nieuwe starten of een oude terugsturen. Een teller in de database kan hij niet terugzetten.
+- De blokkade wordt gecontroleerd vóór Argon2 draait, zodat een geblokkeerd verzoek geen CPU kost. In de tweede-factorstap gebeurt dat een tweede keer onder het rijslot op de gebruiker; gelijktijdige verzoeken wachten daar op elkaar en zien dus de blokkade die een eerder verzoek net zette.
+- Een geslaagde stap wist de teller van het account, nooit die van het IP-adres. Anders kan een aanvaller met één eigen account zijn IP-teller steeds terugzetten.
+- De limieten werken op wat is ingevoerd, niet op of het account bestaat. Een onbekende gebruikersnaam krijgt dezelfde status, dezelfde melding en dezelfde blokkade, en kost precies één Argon2-verificatie (tegen een dummy-hash), zodat ook de timing niets verraadt. Een gebruikersnaam die niet aan de vorm voldoet en een wachtwoord boven 1024 tekens gaan niet naar Argon2, maar tellen wel als mislukking.
+- IPv6-adressen worden per /64 geteld, omdat één toewijzing 2^64 adressen bevat.
+- Blokkades, mislukte logins, gestarte lockouts en gemaakte accounts worden als één JSON-regel gelogd. JSON-escaping voorkomt dat een gebruikersnaam met een regeleinde een valse logregel invoegt; alleen goedgevormde gebruikersnamen worden gelogd, wachtwoorden en codes nooit.
+
+**IP-modus:** `THROTTLE_IP_MODE` kiest hoe streng de IP-limieten zijn: `strict` (standaard), `hackweek` (100 fouten per 15 min en een vaste blokkade van vijf minuten, voor veel gebruikers achter één adres) of `observe` (alleen melden). De limieten per account zijn in alle standen gelijk; een test legt dat vast. Een onbekende waarde laat de app niet starten.
+
+**Beperkingen:**
+
+- Verspreid raden op het wachtwoord van één account wordt alleen gemeld, niet geblokkeerd. In `observe`-modus geldt hetzelfde voor alle IP-limieten, en kost elke poging een Argon2-berekening.
+- De limiet per account vanaf één IP-adres kan ook als wapen werken: iemand op hetzelfde netwerk die je gebruikersnaam kent en vijf keer een verkeerd wachtwoord invoert, sluit je vanaf dat netwerk 15 tot 60 minuten buiten (vanaf een ander netwerk kom je wel binnen). `THROTTLE_IP_MODE` verandert dit niet, omdat het een accountlimiet is. Mogelijke oplossing: een bekend-apparaat-cookie na een geslaagde login. Voor het demoaccount in de hacking week is dit opgelost met `THROTTLE_PAIR_EXEMPT_USERS=hackingweek`: dat account valt niet onder deze blokkade. De IP-limiet en de 2FA-limiet gelden er wel, dus raden blijft begrensd.
+- Gebruikers achter één IP-adres delen de IP-limiet. `hackweek` verkleint dat probleem maar lost het niet op.
+- `TRUSTED_PROXY_HOPS` moet achter Application Gateway en App Service het werkelijke aantal proxies zijn. Te laag: iedereen deelt het adres van de proxy. Te hoog: een aanvaller kiest zijn eigen adres.
+- Registratie verraadt of een gebruikersnaam al bestaat. Zonder tweede kanaal zoals e-mail is dat bij zelfgekozen gebruikersnamen niet te vermijden; de limiet maakt het opsporen alleen traag en het logt.
+- In de wachtwoordstap kan een handvol gelijktijdige verzoeken de limiet licht overschrijden, omdat daar geen rijslot is. Het kan niet meer zijn dan het aantal verzoeken dat tegelijk binnenkomt.
+- Dit beschermt niet tegen volumetrische aanvallen op netwerk- of transportniveau; dat is een taak voor de WAF/edge.
+- Het herstelformulier (`/recover`) en het aanvragen van een nieuwe herstelcode gebruiken dezelfde module: per account 5 pogingen per 15 minuten met blokkade (plafond 24 uur), plus een IP-limiet die met `THROTTLE_IP_MODE` meebeweegt. De oude tabel `recovery_attempts` is vervallen (migratie 004).
+
+Bronnen: `app/ratelimit.py`, `app/app.py`, `app/tests/test_ratelimit.py`, `test_login_throttle.py`, `test_twofa_throttle.py` en `test_register_throttle.py`.
 
 ### Wachtwoordherstel
 
@@ -35,7 +73,7 @@ Herstel via `/recover` vereist **gebruikersnaam + eenmalige herstelcode + actuel
 - Bestaande gebruikers maken een herstelcode aan via **Herstelcode beheren**, met hun huidige wachtwoord en een verse 2FA-code. Aanmaken vervangt een eerdere code. Na gebruik kan daar een nieuwe code worden aangemaakt.
 - Bewaar de code offline of in een wachtwoordmanager, apart van de authenticator. Zonder herstelcode of authenticator is deze zelfservice-route niet beschikbaar; er is geen bypass.
 
-De IP-limiet gebruikt het directe clientadres. Achter een proxy moet de vertrouwde proxyconfiguratie apart worden ingericht; ongecontroleerde forwarding-headers worden niet vertrouwd.
+De IP-limiet gebruikt standaard het directe clientadres en negeert `X-Forwarded-For`. Achter een proxy stel je `TRUSTED_PROXY_HOPS` in op het aantal proxies; de app neemt dan het adres dat de laatste proxy zelf toevoegde en negeert wat een client eronder meestuurt.
 
 ### System authentication: databaseaccount en Vault-token
 

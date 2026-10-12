@@ -14,3 +14,6 @@ __pycache__/
 *.py[cod]
 venv/
 .venv/
+# Pytest maakt deze map in de container aan; git meldt anders bij elke status
+# "Permission denied" en die ruis verbergt echte meldingen.
+.pytest_cache/

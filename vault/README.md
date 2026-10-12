@@ -22,6 +22,13 @@ is niet nodig. Deze configuratie is uitsluitend voor ontwikkeling en CI.
   plaintext van ciphertext, ook als iemand letterlijk `vault:v1:...` schreef.
 - Bij een Vault-fout worden wijzigingen niet als plaintext opgeslagen. De app
   geeft een generieke 503-reactie bij routeverzoeken.
+- Notities zijn gebonden aan hun eigenaar: ze gebruiken de afgeleide sleutel
+  `notes-bound`, en bij elke aanroep gaat het gebruikers-id mee als `context`.
+  Kopieert iemand met schrijfrechten op de database de ciphertext van A naar
+  een rij van B, dan weigert Vault hem te ontsleutelen (HTTP 400) en toont de
+  app een melding bij die ene notitie. De kolom `notes.bound` houdt bij welke
+  notities al zo zijn versleuteld; `encrypt-notes` zet de rest om (oude sleutel
+  `notes` zonder context, en plaintext).
 - TOTP-secrets gebruiken voorlopig nog `pgcrypto` en `DB_ENCRYPTION_KEY`.
 
 Controleer configuratie en draai de tests:

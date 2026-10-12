@@ -10,7 +10,7 @@ import os
 
 import psycopg
 
-from conftest import log_in_as
+from conftest import TEST_CSRF, log_in_as
 from vault_crypto import decrypt_note
 
 
@@ -46,7 +46,7 @@ def test_gebruiker_kan_notitie_van_een_ander_niet_verwijderen(client, twee_gebru
 
     log_in_as(client, twee_gebruikers["test_gebruiker_b"])
     # B kent of gokt het id van de notitie van A en stuurt het verwijderverzoek.
-    client.post(f"/notes/{notitie_van_a}/delete")
+    client.post(f"/notes/{notitie_van_a}/delete", data={"csrf_token": TEST_CSRF})
 
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn, conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM notes WHERE id = %s", (notitie_van_a,))
@@ -66,7 +66,7 @@ def test_gebruiker_kan_zijn_eigen_notitie_wel_verwijderen(client, twee_gebruiker
     eigen_notitie = twee_gebruikers["test_gebruiker_b_notitie"]
 
     log_in_as(client, twee_gebruikers["test_gebruiker_b"])
-    client.post(f"/notes/{eigen_notitie}/delete")
+    client.post(f"/notes/{eigen_notitie}/delete", data={"csrf_token": TEST_CSRF})
 
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn, conn.cursor() as cur:
         cur.execute("SELECT count(*) FROM notes WHERE id = %s", (eigen_notitie,))
@@ -80,7 +80,8 @@ def test_gebruiker_kan_notitie_van_een_ander_niet_aanpassen(client, twee_gebruik
     log_in_as(client, twee_gebruikers["test_gebruiker_b"])
     assert client.get(f"/notes/{note_id}/edit").status_code == 404
     response = client.post(
-        f"/notes/{note_id}/edit", data={"title": "gewijzigd", "body": "gewijzigd"}
+        f"/notes/{note_id}/edit",
+        data={"csrf_token": TEST_CSRF, "title": "gewijzigd", "body": "gewijzigd"},
     )
     assert response.status_code == 404
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn, conn.cursor() as cur:
@@ -95,12 +96,13 @@ def test_gebruiker_kan_zijn_eigen_notitie_aanpassen(client, twee_gebruikers):
     assert page.status_code == 200
     assert "notitie van test_gebruiker_b" in page.get_data(as_text=True)
     response = client.post(
-        f"/notes/{note_id}/edit", data={"title": "Nieuwe titel", "body": "Nieuwe inhoud"}
+        f"/notes/{note_id}/edit",
+        data={"csrf_token": TEST_CSRF, "title": "Nieuwe titel", "body": "Nieuwe inhoud"},
     )
     assert response.status_code == 302
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn, conn.cursor() as cur:
-        cur.execute("SELECT title, body, encrypted FROM notes WHERE id = %s", (note_id,))
-        title, body, encrypted = cur.fetchone()
-        assert encrypted is True
+        cur.execute("SELECT title, body, encrypted, bound, user_id FROM notes WHERE id = %s", (note_id,))
+        title, body, encrypted, bound, owner = cur.fetchone()
+        assert encrypted is True and bound is True
         assert title.startswith("vault:v") and body.startswith("vault:v")
-        assert (decrypt_note(title), decrypt_note(body)) == ("Nieuwe titel", "Nieuwe inhoud")
+        assert (decrypt_note(title, owner), decrypt_note(body, owner)) == ("Nieuwe titel", "Nieuwe inhoud")

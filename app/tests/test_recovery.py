@@ -25,7 +25,14 @@ def recovery(monkeypatch):
     cursor = conn.__enter__.return_value.cursor.return_value.__enter__.return_value
     cursor.fetchone.return_value = (42, stored_hash, secret, None)
     monkeypatch.setattr(application, "db", lambda: conn)
-    monkeypatch.setattr(application, "allow_recovery_attempt", lambda scope, account: True)
+    # Deze tests vervangen de hele database door een mock waarvan elke
+    # fetchone() hetzelfde antwoord geeft. De login-throttle zou dat antwoord
+    # als wachttijd lezen, dus hier uitgezet. Hij heeft eigen tests tegen de
+    # echte database: test_ratelimit, test_login_throttle en test_twofa_throttle.
+    monkeypatch.setattr(application.ratelimit, "blocked_seconds", lambda cur, keys: 0)
+    monkeypatch.setattr(application.ratelimit, "record_failure", lambda cur, policy, key: application.ratelimit.Outcome(1))
+    monkeypatch.setattr(application.ratelimit, "reset", lambda cur, key: None)
+    monkeypatch.setattr(application.ratelimit, "purge_stale", lambda cur: None)
     return cursor, display, secret
 
 
@@ -104,7 +111,7 @@ def test_csrf_blokkeert_herstel_voordat_bewijzen_worden_verwerkt(client, recover
 
 def test_poginglimiet_blokkeert_reset(client, recovery, monkeypatch):
     data = payload(client, recovery)
-    monkeypatch.setattr(application, "allow_recovery_attempt", lambda *args: False)
+    monkeypatch.setattr(application.ratelimit, "blocked_seconds", lambda cur, keys: 600)
     assert client.post("/recover", data=data).status_code == 429
     recovery[0].execute.assert_not_called()
 
