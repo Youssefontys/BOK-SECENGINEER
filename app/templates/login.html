@@ -6,9 +6,13 @@
 {% block content %}
   <h1>Inloggen</h1>
   {% if password_reset %}
-    <p class="card" role="status">Je wachtwoord is hersteld. Log in met je nieuwe
-       wachtwoord en een nieuwe authenticator-code. Je herstelcode is verbruikt;
-       maak na het inloggen een nieuwe aan via ‘Herstelcode beheren’.</p>
+    <section id="auth-feedback" class="notice success" role="status" tabindex="-1">
+      <h2>Wachtwoordherstel gelukt</h2>
+      <p>Je wachtwoord is hersteld. Log hieronder in met je nieuwe wachtwoord
+         en een nieuwe authenticator-code.</p>
+      <p class="hint">Je herstelcode is verbruikt. Maak na het inloggen een nieuwe
+         aan via ‘Herstelcode beheren’.</p>
+    </section>
   {% endif %}
 
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
@@ -30,4 +34,5 @@
     <a href="{{ url_for('register') }}">Nog geen account? Registreren</a>
     <a href="{{ url_for('recover') }}">Wachtwoord vergeten?</a>
   </nav>
+  {% if password_reset %}<script src="{{ url_for('static', filename='auth-feedback.js') }}" defer></script>{% endif %}
 {% endblock %}

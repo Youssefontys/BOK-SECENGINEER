@@ -312,7 +312,10 @@ def register():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "GET":
-        return render_template("login.html", password_reset=session.pop("password_reset", False))
+        # Een refresh/prefetch mag de herstelbevestiging niet wegconsumeren.
+        return render_template("login.html", password_reset=session.get("password_reset", False))
+
+    session.pop("password_reset", None)
 
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
@@ -408,7 +411,7 @@ def recover():
         )
     session.clear()
     session["password_reset"] = True
-    return redirect(url_for("login"))
+    return redirect(url_for("login"), code=303)
 
 
 @app.route("/account/recovery-code", methods=["GET", "POST"])
