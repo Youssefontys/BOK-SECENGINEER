@@ -28,6 +28,9 @@ def client():
     return flask_app.test_client()
 
 
+TEST_CSRF = "test-csrf-token"
+
+
 def log_in_as(client, user_id):
     """Zet de sessie rechtstreeks.
 
@@ -35,10 +38,15 @@ def log_in_as(client, user_id):
     (mag deze gebruiker hierbij?), niet over authenticatie (is het de juiste
     gebruiker?). De 2FA-stroom erbij halen zou de test alleen langer en
     brozer maken zonder dat hij meer bewijst.
+
+    Zet ook meteen een CSRF-token in de sessie, dat tests als TEST_CSRF
+    meesturen. Een token ophalen via een GET zou bij tests met een
+    database-double de gemockte antwoorden opmaken.
     """
     with client.session_transaction() as session:
         session["user_id"] = user_id
         session["auth_version"] = 0
+        session["csrf_token"] = TEST_CSRF
 
 
 @pytest.fixture

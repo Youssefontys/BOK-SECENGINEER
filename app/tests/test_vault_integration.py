@@ -9,7 +9,7 @@ import psycopg
 import pytest
 
 import app as application
-from conftest import log_in_as
+from conftest import TEST_CSRF, log_in_as
 from vault_crypto import decrypt_note, encrypt_note
 
 
@@ -38,7 +38,7 @@ def test_app_token_heeft_geen_beheerrechten(path, method, payload):
 def test_nieuwe_notitie_staat_versleuteld_in_database(client, twee_gebruikers):
     user_id = twee_gebruikers["test_gebruiker_b"]
     log_in_as(client, user_id)
-    response = client.post("/", data={"title": "Geheime titel", "body": "Geheime inhoud"})
+    response = client.post("/", data={"csrf_token": TEST_CSRF, "title": "Geheime titel", "body": "Geheime inhoud"})
     assert response.status_code == 302
     with psycopg.connect(os.environ["DATABASE_URL"]) as conn, conn.cursor() as cur:
         cur.execute("SELECT title, body, encrypted FROM notes WHERE user_id = %s ORDER BY id DESC LIMIT 1", (user_id,))

@@ -9,6 +9,7 @@
     <a href="{{ url_for('profile') }}">Profiel</a>
     <a href="{{ url_for('issue_recovery_code') }}">Herstelcode beheren</a>
     <form method="post" action="{{ url_for('logout') }}">
+      {% include "_csrf.html" %}
       <button type="submit">Uitloggen</button>
     </form>
   </nav>

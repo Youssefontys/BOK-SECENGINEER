@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import app as application
-from conftest import log_in_as
+from conftest import TEST_CSRF, log_in_as
 
 
 @pytest.fixture
@@ -26,10 +26,14 @@ def cursor(monkeypatch):
 @pytest.mark.parametrize("method", ["get", "post"])
 @pytest.mark.parametrize("pending", [False, True])
 def test_bewerken_vereist_volledige_login(client, cursor, method, pending):
-    if pending:
-        with client.session_transaction() as session:
+    # Met een geldig token, zodat de test over de login gaat en niet over CSRF
+    # (dat heeft eigen tests in test_csrf.py).
+    with client.session_transaction() as session:
+        session["csrf_token"] = TEST_CSRF
+        if pending:
             session["pending_user_id"] = 7
-    response = getattr(client, method)("/notes/12/edit")
+    kwargs = {"data": {"csrf_token": TEST_CSRF}} if method == "post" else {}
+    response = getattr(client, method)("/notes/12/edit", **kwargs)
     assert response.status_code == 302
     assert response.headers["Location"] == "/login"
     cursor.execute.assert_not_called()
@@ -42,7 +46,7 @@ def test_bewerken_vereist_volledige_login(client, cursor, method, pending):
 def test_ongeldige_invoer_wordt_niet_opgeslagen(client, cursor, title, body):
     log_in_as(client, 7)
     cursor.fetchone.return_value = ("Oud", "Bestaande inhoud", False)
-    response = client.post("/notes/12/edit", data={"title": title, "body": body})
+    response = client.post("/notes/12/edit", data={"csrf_token": TEST_CSRF, "title": title, "body": body})
     assert response.status_code == 400
     assert cursor.execute.call_count == 1
 
@@ -53,14 +57,14 @@ def test_bewerkformulier_escapet_inhoud_en_behoudt_invoer_bij_fout(client, curso
     page = client.get("/notes/12/edit").get_data(as_text=True)
     assert "<script>" not in page
     assert "&lt;script&gt;" in page
-    response = client.post("/notes/12/edit", data={"title": "", "body": "Bewaar mijn tekst"})
+    response = client.post("/notes/12/edit", data={"csrf_token": TEST_CSRF, "title": "", "body": "Bewaar mijn tekst"})
     assert "Bewaar mijn tekst" in response.get_data(as_text=True)
 
 
 def test_verdwenen_notitie_tijdens_opslaan_geeft_404(client, cursor):
     log_in_as(client, 7)
     cursor.fetchone.side_effect = [("Oud", "Inhoud", False), None]
-    response = client.post("/notes/12/edit", data={"title": "Nieuw", "body": "Inhoud"})
+    response = client.post("/notes/12/edit", data={"csrf_token": TEST_CSRF, "title": "Nieuw", "body": "Inhoud"})
     assert response.status_code == 404
 
 
@@ -68,7 +72,7 @@ def test_geldige_wijziging_slaat_op_en_keert_terug(client, cursor):
     log_in_as(client, 7)
     cursor.fetchone.side_effect = [("Oud", "Inhoud", False), (12,)]
     response = client.post(
-        "/notes/12/edit", data={"title": " Nieuw ", "body": " Nieuwe inhoud "}
+        "/notes/12/edit", data={"csrf_token": TEST_CSRF, "title": " Nieuw ", "body": " Nieuwe inhoud "}
     )
     assert response.status_code == 302
     assert response.headers["Location"] == "/"
@@ -92,7 +96,7 @@ def test_vault_storing_slaat_geen_plaintext_op(client, cursor, monkeypatch):
         raise application.VaultUnavailable("Gevoelige interne fout")
 
     monkeypatch.setattr(application, "encrypt_note", unavailable)
-    response = client.post("/notes/12/edit", data={"title": "Nieuw", "body": "Inhoud"})
+    response = client.post("/notes/12/edit", data={"csrf_token": TEST_CSRF, "title": "Nieuw", "body": "Inhoud"})
     assert response.status_code == 503
     assert "Gevoelige interne fout" not in response.get_data(as_text=True)
     assert cursor.execute.call_count == 1

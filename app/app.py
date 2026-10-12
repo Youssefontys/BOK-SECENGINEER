@@ -117,7 +117,12 @@ def protect_authentication():
         session.clear()
         if request.endpoint not in {"login", "register", "recover"}:
             return redirect(url_for("login"))
-    if request.method == "POST" and request.endpoint in AUTH_FORMS:
+    # Een CSRF-token voor elke POST, niet alleen voor de inlogformulieren.
+    # Eerder leunden aanmaken, aanpassen, verwijderen en uitloggen alleen op
+    # SameSite=Lax. Dat houdt cross-site formulieren tegen in moderne browsers,
+    # maar was dan de enige laag. request.endpoint is None voor een pad dat
+    # niet bestaat: dat hoort een 404 te worden en geen 400.
+    if request.method == "POST" and request.endpoint:
         expected = session.get("csrf_token", "")
         received = request.form.get("csrf_token", "")
         if not expected or not hmac.compare_digest(expected.encode(), received.encode()):
