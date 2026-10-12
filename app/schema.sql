@@ -53,3 +53,16 @@ CREATE TABLE IF NOT EXISTS recovery_attempts (
     window_started TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_recovery_attempts_window ON recovery_attempts(window_started);
+
+-- Throttling van inlogpogingen, zie ratelimit.py. Zelfde definitie als in
+-- migrations/003_login_throttle.sql: een nieuw volume krijgt hem hier, een
+-- bestaand volume via db-migrate.
+CREATE TABLE IF NOT EXISTS auth_throttle (
+    key            TEXT PRIMARY KEY,
+    failures       INTEGER NOT NULL DEFAULT 0,
+    window_started TIMESTAMPTZ NOT NULL DEFAULT now(),
+    locked_until   TIMESTAMPTZ,
+    lock_count     INTEGER NOT NULL DEFAULT 0,
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_auth_throttle_updated ON auth_throttle(updated_at);
