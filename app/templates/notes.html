@@ -34,7 +34,7 @@
     </form>
   </details>
 
-  <p class="count">{{ notes|length }} {{ "notitie" if notes|length == 1 else "notities" }}</p>
+  <p class="count">{{ notes|length }} van {{ max_notes }} notities</p>
 
   {# Jinja escapet {{ ... }} standaard, dus een notitie met <script> erin
      verschijnt als tekst en wordt niet uitgevoerd. Gebruik hier nooit

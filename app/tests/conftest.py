@@ -155,3 +155,47 @@ def foute_code(secret):
     huidig = int(time.time()) // 30
     geldig = {pyotp.TOTP(secret).at(stap * 30) for stap in (huidig - 1, huidig, huidig + 1)}
     return next(f"{n:06d}" for n in range(1000) if f"{n:06d}" not in geldig)
+
+
+class RijSlot:
+    """Houdt het rijslot op een gebruiker vast, zodat verzoeken erop moeten wachten.
+
+    Voor tests die willen bewijzen dat code iets pas doet nadat ze het slot
+    heeft: de test houdt het slot, laat verzoeken eraan lopen, verandert iets
+    terwijl ze wachten, en laat dan los. Wie nog vóór het slot telde of las,
+    ziet de verandering niet en geeft het verkeerde antwoord.
+
+    Een tweede verbinding in autocommit kijkt toe. Postgres cachet
+    pg_stat_activity namelijk binnen een transactie, dus wie in dezelfde
+    transactie blijft pollen ziet steeds dezelfde verouderde momentopname.
+
+    Gebruik sluit() altijd in een finally, vóór een threadpool wordt
+    afgesloten: wachtende threads hangen anders eindeloos op een slot dat
+    alleen deze test kan loslaten.
+    """
+
+    def __init__(self, user_id):
+        self.houder = psycopg.connect(os.environ["DATABASE_URL"])
+        self.kijker = psycopg.connect(os.environ["DATABASE_URL"], autocommit=True)
+        self.cur = self.houder.cursor()
+        self.cur.execute("SELECT 1 FROM users WHERE id = %s FOR UPDATE", (user_id,))
+
+    def wacht_op(self, aantal, seconden=15):
+        """Wacht tot minstens `aantal` sessies op een slot staan te wachten."""
+        wachtend = 0
+        for _ in range(int(seconden * 10)):
+            wachtend = self.kijker.execute(
+                "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'"
+            ).fetchone()[0]
+            if wachtend >= aantal:
+                return
+            time.sleep(0.1)
+        raise AssertionError(f"slechts {wachtend} van {aantal} verzoeken bereikte het rijslot")
+
+    def commit(self):
+        self.houder.commit()
+
+    def sluit(self):
+        self.houder.rollback()
+        self.houder.close()
+        self.kijker.close()

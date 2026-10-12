@@ -86,6 +86,11 @@ USERNAME_PATTERN = re.compile(r"[a-z0-9_]{3,32}")
 MAX_PASSWORD_LENGTH = 1024
 MAX_TITLE = 120
 MAX_BODY = 4000
+# Zonder grens kan één account duizenden notities aanmaken. Elke notitie kost
+# bij het tonen twee Vault-aanroepen (4,4 ms per stuk gemeten), dus 2000
+# notities maken één paginaweergave 17 seconden lang, en met twee workers
+# houdt één account de hele site bezet.
+MAX_NOTES_PER_USER = 25
 DUMMY_RECOVERY_HASH = ph.hash(secrets.token_hex(24))
 AUTH_FORMS = {"register", "login", "login_2fa", "recover", "issue_recovery_code"}
 
@@ -97,6 +102,7 @@ def csrf_token():
 
 
 app.jinja_env.globals["csrf_token"] = csrf_token
+app.jinja_env.globals["max_notes"] = MAX_NOTES_PER_USER
 
 
 def is_session_current(user_id, version):
@@ -708,11 +714,34 @@ def notes():
                 form_body=body,
             ), 400
 
+        # Eerst versleutelen en pas daarna het slot nemen, zodat het slot kort is.
+        stored_title, stored_body = encrypt_note(title), encrypt_note(body)
         with db() as conn, conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO notes (user_id, title, body, encrypted) VALUES (%s, %s, %s, TRUE)",
-                (user_id, encrypt_note(title), encrypt_note(body)),
-            )
+            # Rijslot op de gebruiker, en pas daarna tellen. Gelijktijdige
+            # aanmaakverzoeken van hetzelfde account wachten hier op elkaar.
+            # Zonder slot zien er twee tegelijk "24 van 25", voegen er allebei
+            # een toe, en heeft iemand er 26.
+            #
+            # MUTATIETEST (voor de bewijsvoering): haal de FOR UPDATE-query
+            # hieronder tijdelijk weg en draai
+            # tests/test_note_limit.py::test_aanmaken_telt_pas_nadat_het_rijslot_is_genomen
+            # Die hoort dan rood te worden. Daarna meteen terugzetten.
+            cur.execute("SELECT 1 FROM users WHERE id = %s FOR UPDATE", (user_id,))
+            cur.execute("SELECT count(*) FROM notes WHERE user_id = %s", (user_id,))
+            full = cur.fetchone()[0] >= MAX_NOTES_PER_USER
+            if not full:
+                cur.execute(
+                    "INSERT INTO notes (user_id, title, body, encrypted) VALUES (%s, %s, %s, TRUE)",
+                    (user_id, stored_title, stored_body),
+                )
+        if full:
+            return render_template(
+                "notes.html",
+                notes=fetch_notes(user_id),
+                error=f"Je hebt het maximum van {MAX_NOTES_PER_USER} notities bereikt. Verwijder er eerst een.",
+                form_title=title,
+                form_body=body,
+            ), 409
         return redirect(url_for("notes"))
 
     # pop en niet get: de melding hoort één keer te verschijnen, niet bij
