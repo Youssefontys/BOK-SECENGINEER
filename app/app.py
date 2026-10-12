@@ -202,7 +202,22 @@ def log_security_event(event, *, warn=False, **fields):
     (app.logger.warning if warn else app.logger.info)(line)
 
 
-def throttled_response(template, wait_seconds):
+def log_throttle_outcomes(outcomes, **context):
+    """Log een gestarte blokkade of een bereikte meldgrens, per beleidsregel."""
+    for scope, outcome in outcomes.items():
+        if outcome.locked_for:
+            log_security_event(
+                "lockout_started", warn=True, scope=scope,
+                retry_after=outcome.locked_for, **context,
+            )
+        if outcome.threshold_crossed:
+            # Alleen voor niet-blokkerende regels: de grens is net bereikt,
+            # er wordt niets geblokkeerd. Voor login_account is dit het signaal
+            # van een verspreide aanval op één account.
+            log_security_event("threshold_crossed", warn=True, scope=scope, **context)
+
+
+def throttled_response(template, wait_seconds, subject="mislukte pogingen"):
     """Antwoord bij een blokkade: 429 met Retry-After.
 
     De melding is voor iedereen hetzelfde, dus ook voor een gebruikersnaam die
@@ -211,7 +226,7 @@ def throttled_response(template, wait_seconds):
     minutes = max(1, -(-wait_seconds // 60))
     unit = "minuut" if minutes == 1 else "minuten"
     response = make_response(
-        render_template(template, error=f"Te veel mislukte pogingen. Probeer het over {minutes} {unit} opnieuw."),
+        render_template(template, error=f"Te veel {subject}. Probeer het over {minutes} {unit} opnieuw."),
         429,
     )
     response.headers["Retry-After"] = str(wait_seconds)
@@ -445,17 +460,7 @@ def login():
         log_security_event(
             "login_failed", ip=request.remote_addr, username=loggable_username(username)
         )
-        for scope, outcome in outcomes.items():
-            if outcome.locked_for:
-                log_security_event(
-                    "lockout_started", warn=True, scope=scope, ip=request.remote_addr,
-                    username=loggable_username(username), retry_after=outcome.locked_for,
-                )
-            if outcome.threshold_crossed:
-                log_security_event(
-                    "distributed_guessing_suspected", warn=True, scope=scope,
-                    username=loggable_username(username),
-                )
+        log_throttle_outcomes(outcomes, ip=request.remote_addr, username=loggable_username(username))
         return render_template("login.html", error="Onjuiste gebruikersnaam of wachtwoord."), 401
 
     # Alleen de teller van dit account wissen, nooit die van het IP-adres:
@@ -545,12 +550,7 @@ def login_2fa():
             }
             ratelimit.purge_stale(cur)
             log_security_event("twofa_failed", ip=request.remote_addr, user_id=user_id)
-            for scope, outcome in outcomes.items():
-                if outcome.locked_for:
-                    log_security_event(
-                        "lockout_started", warn=True, scope=scope, ip=request.remote_addr,
-                        user_id=user_id, retry_after=outcome.locked_for,
-                    )
+            log_throttle_outcomes(outcomes, ip=request.remote_addr, user_id=user_id)
             return render_template("twofactor.html", error="Ongeldige of al gebruikte code. Wacht op een nieuwe code."), 401
         cur.execute("UPDATE users SET last_totp_step = %s WHERE id = %s", (step, user_id))
         # Alleen de teller van het account; zie de wachtwoordstap voor waarom

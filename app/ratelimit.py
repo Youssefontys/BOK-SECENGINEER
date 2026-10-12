@@ -17,6 +17,7 @@ De beleidskeuzes staan in POLICIES, met hieronder waarom ze zo zijn.
 """
 
 import ipaddress
+import os
 from dataclasses import dataclass
 
 
@@ -30,16 +31,14 @@ class Policy:
     enforce: bool = True
 
 
-POLICIES = {
-    # Per IP-adres, over alle accounts heen. Dit stopt password spraying
-    # (een paar veelgebruikte wachtwoorden over veel accounts) en
-    # credential stuffing vanaf een enkele bron. Plafond 1 uur, niet 24:
-    # achter een gedeeld schoolnetwerk zitten veel onschuldige gebruikers
-    # achter hetzelfde adres.
-    "login_ip": Policy(20, 900, 900, 3600),
-
+# Limieten die aan een account hangen. Die staan los van het IP-adres en
+# veranderen NIET met de IP-modus hieronder: wat ook met de IP-limieten
+# gebeurt, de accounts zelf blijven even streng beschermd.
+ACCOUNT_POLICIES = {
     # Per account vanaf één IP-adres: gericht raden op één account. Bewust
-    # de combinatie en niet het account alleen, zie "login_account".
+    # de combinatie en niet het account alleen, zie "login_account". Een
+    # klasgenoot achter hetzelfde schoolnetwerk raakt dit niet: die heeft
+    # een eigen combinatie.
     "login_pair": Policy(5, 900, 900, 3600),
 
     # Per account, over alle IP's heen, in de wachtwoordstap: NIET blokkerend.
@@ -54,10 +53,56 @@ POLICIES = {
     # DoS-hefboom zijn voor een buitenstaander, want je bereikt deze stap
     # alleen met het juiste wachtwoord. Plafond 24 uur.
     "twofa_account": Policy(5, 900, 900, 86400),
-
-    # Per IP in de tweede-factorstap.
-    "twofa_ip": Policy(20, 900, 900, 3600),
 }
+
+# Limieten die aan een IP-adres hangen. Het probleem met IP-limieten is een
+# gedeeld netwerk: op school of achter een NAT zitten veel onschuldige
+# gebruikers achter hetzelfde adres, en één aanvaller kan dan iedereen
+# buitensluiten. Daarom zijn er drie standen, te kiezen met THROTTLE_IP_MODE.
+IP_POLICIES = {
+    # Standaard. Streng en met escalatie, bedoeld voor een app met
+    # gebruikers van overal.
+    "strict": {
+        # Stopt password spraying (een paar veelgebruikte wachtwoorden over
+        # veel accounts) en credential stuffing vanaf een enkele bron.
+        "login_ip": Policy(20, 900, 900, 3600),
+        "twofa_ip": Policy(20, 900, 900, 3600),
+        # Elke registratie kost twee Argon2-berekeningen, en een
+        # gebruikersnaam die al bestaat wordt gemeld: zonder limiet is dit
+        # een gratis manier om accounts op te sporen en de server te belasten.
+        "register_ip": Policy(10, 3600, 3600, 14400),
+    },
+    # Voor een omgeving met veel gebruikers achter één adres, zoals een
+    # klaslokaal tijdens de hacking week. Ruimere drempels en een vaste,
+    # korte blokkade zonder escalatie: een snelle scanner wordt nog steeds
+    # afgeremd, maar de rest van de klas wacht hooguit vijf minuten.
+    "hackweek": {
+        "login_ip": Policy(100, 900, 300, 300),
+        "twofa_ip": Policy(100, 900, 300, 300),
+        "register_ip": Policy(30, 3600, 300, 300),
+    },
+    # Alleen tellen en melden, nooit op IP blokkeren. Het risico: niets stopt
+    # nog een aanvaller die massaal verschillende accounts probeert, en elke
+    # poging kost een Argon2-berekening, dus de app kan daardoor traag worden.
+    # De accounts zelf blijven beschermd door ACCOUNT_POLICIES.
+    "observe": {
+        "login_ip": Policy(20, 900, 0, 0, enforce=False),
+        "twofa_ip": Policy(20, 900, 0, 0, enforce=False),
+        "register_ip": Policy(10, 3600, 0, 0, enforce=False),
+    },
+}
+
+
+def build_policies(mode):
+    """Het volledige beleid voor een IP-modus: accountregels plus IP-regels."""
+    if mode not in IP_POLICIES:
+        # Bewust een fout en geen stille terugval op "strict": een typfout in
+        # de configuratie moet opvallen, niet onopgemerkt een andere stand geven.
+        raise ValueError(f"Onbekende THROTTLE_IP_MODE {mode!r}; kies uit {sorted(IP_POLICIES)}")
+    return {**ACCOUNT_POLICIES, **IP_POLICIES[mode]}
+
+
+POLICIES = build_policies(os.environ.get("THROTTLE_IP_MODE", "strict"))
 
 
 @dataclass(frozen=True)

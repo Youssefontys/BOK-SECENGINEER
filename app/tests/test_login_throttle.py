@@ -14,6 +14,7 @@ import pytest
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import app as application
+import ratelimit
 from conftest import WACHTWOORD, post_login
 
 FOUT = "dit-is-niet-het-wachtwoord"
@@ -195,6 +196,47 @@ def test_met_een_vertrouwde_proxy_telt_het_adres_dat_de_proxy_toevoegde(client, 
     # Een ander echt adres heeft een eigen teller.
     ander_adres = post_login(client, account["username"], WACHTWOORD, {"X-Forwarded-For": "9.9.9.1, 203.0.113.8"})
     assert ander_adres.status_code == 302
+
+
+def test_observe_modus_blokkeert_nooit_op_ip_maar_meldt_het_wel(client, account, monkeypatch, caplog):
+    monkeypatch.setitem(ratelimit.POLICIES, "login_ip", ratelimit.IP_POLICIES["observe"]["login_ip"])
+    caplog.set_level(logging.INFO)
+
+    statussen = [post_login(client, f"onbekend_{i}", FOUT).status_code for i in range(25)]
+
+    assert statussen == [401] * 25
+    assert post_login(client, account["username"], WACHTWOORD).status_code == 302
+    events = [json.loads(r.getMessage()) for r in caplog.records if r.name == application.app.logger.name]
+    assert any(e["event"] == "threshold_crossed" and e["scope"] == "login_ip" for e in events)
+
+
+def test_hackweek_modus_laat_een_klas_door_en_blokkeert_kort(client, account, monkeypatch):
+    monkeypatch.setitem(ratelimit.POLICIES, "login_ip", ratelimit.IP_POLICIES["hackweek"]["login_ip"])
+
+    # Vijfentwintig fouten van verschillende mensen zijn onder strict al een
+    # blokkade (drempel 20), maar hier niet.
+    assert [post_login(client, f"onbekend_{i}", FOUT).status_code for i in range(25)] == [401] * 25
+    assert post_login(client, account["username"], WACHTWOORD).status_code == 302
+
+    # Wordt de drempel toch gehaald, dan is de blokkade kort en vast.
+    with application.db() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO auth_throttle (key, failures) VALUES (%s, 99) "
+            "ON CONFLICT (key) DO UPDATE SET failures = 99",
+            (ip_sleutel(),),
+        )
+    post_login(client, "nog_een_onbekende", FOUT)
+    geblokkeerd = post_login(client, account["username"], WACHTWOORD)
+    assert geblokkeerd.status_code == 429
+    assert 0 < int(geblokkeerd.headers["Retry-After"]) <= 300
+
+
+def test_de_accountlimiet_blijft_in_hackweek_modus_even_streng(client, account, monkeypatch):
+    """Ruimere IP-limieten mogen de bescherming van het account zelf niet raken."""
+    monkeypatch.setitem(ratelimit.POLICIES, "login_ip", ratelimit.IP_POLICIES["hackweek"]["login_ip"])
+
+    assert fouten(client, account["username"], 5) == [401] * 5
+    assert post_login(client, account["username"], WACHTWOORD).status_code == 429
 
 
 def test_mislukte_login_wordt_gelogd_zonder_wachtwoord_en_zonder_loginjectie(client, account, caplog):

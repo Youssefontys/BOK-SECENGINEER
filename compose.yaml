@@ -119,6 +119,12 @@ services:
       # deelt het IP van de proxy, te hoog en een aanvaller kan zijn eigen
       # adres opgeven.
       TRUSTED_PROXY_HOPS: "0"
+      # Hoe streng de IP-limieten zijn bij inloggen en registreren: strict
+      # (standaard), hackweek (ruimer en korter, voor veel gebruikers achter
+      # één adres) of observe (alleen melden, nooit blokkeren op IP). De
+      # limieten per account zijn in alle standen gelijk. Zie IP_POLICIES in
+      # ratelimit.py. Een onbekende waarde laat de app niet starten.
+      THROTTLE_IP_MODE: ${THROTTLE_IP_MODE:-strict}
     ports:
       - "127.0.0.1:5000:5000"
     volumes:

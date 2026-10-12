@@ -65,6 +65,37 @@ def test_onleesbaar_adres_valt_in_een_gedeelde_strenge_bak(onleesbaar):
     assert ratelimit.client_bucket(onleesbaar) == "unknown"
 
 
+def test_onbekende_ip_modus_geeft_een_fout_in_plaats_van_stil_te_versoepelen():
+    with pytest.raises(ValueError):
+        ratelimit.build_policies("hackwek")  # typfout
+
+
+@pytest.mark.parametrize("modus", list(ratelimit.IP_POLICIES))
+def test_accountlimieten_zijn_in_elke_ip_modus_gelijk(modus):
+    """Wat er met de IP-limieten gebeurt mag de accounts zelf nooit versoepelen."""
+    beleid = ratelimit.build_policies(modus)
+    for naam, regel in ratelimit.ACCOUNT_POLICIES.items():
+        assert beleid[naam] == regel
+
+
+def test_elke_ip_modus_definieert_dezelfde_regels():
+    namen = [set(regels) for regels in ratelimit.IP_POLICIES.values()]
+    assert all(n == namen[0] for n in namen)
+
+
+def test_observe_blokkeert_nooit_en_strict_altijd():
+    assert all(not r.enforce for r in ratelimit.IP_POLICIES["observe"].values())
+    assert all(r.enforce for r in ratelimit.IP_POLICIES["strict"].values())
+
+
+def test_hackweek_is_ruimer_en_korter_dan_strict_en_escaleert_niet():
+    for naam, hack in ratelimit.IP_POLICIES["hackweek"].items():
+        streng = ratelimit.IP_POLICIES["strict"][naam]
+        assert hack.max_failures > streng.max_failures
+        assert hack.max_lock_seconds < streng.max_lock_seconds
+        assert hack.base_lock_seconds == hack.max_lock_seconds, "een vaste blokkade, zonder verdubbeling"
+
+
 def test_onder_de_drempel_geen_blokkade(key):
     outcome = fail(key, 2)
     assert outcome.failures == 2 and outcome.locked_for == 0
