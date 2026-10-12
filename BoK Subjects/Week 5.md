@@ -52,6 +52,7 @@ Mislukte pogingen worden geteld en leiden tot een tijdelijke blokkade. De teller
 **Beperkingen:**
 
 - Verspreid raden op het wachtwoord van één account wordt alleen gemeld, niet geblokkeerd. In `observe`-modus geldt hetzelfde voor alle IP-limieten, en kost elke poging een Argon2-berekening.
+- De limiet per account vanaf één IP-adres kan ook als wapen werken: iemand op hetzelfde netwerk die je gebruikersnaam kent en vijf keer een verkeerd wachtwoord invoert, sluit je vanaf dat netwerk 15 tot 60 minuten buiten (vanaf een ander netwerk kom je wel binnen). `THROTTLE_IP_MODE` verandert dit niet, omdat het een accountlimiet is. Mogelijke oplossing: een bekend-apparaat-cookie na een geslaagde login. Voor een demo-account in de hacking week is dit het risico dat telt.
 - Gebruikers achter één IP-adres delen de IP-limiet. `hackweek` verkleint dat probleem maar lost het niet op.
 - `TRUSTED_PROXY_HOPS` moet achter Application Gateway en App Service het werkelijke aantal proxies zijn. Te laag: iedereen deelt het adres van de proxy. Te hoog: een aanvaller kiest zijn eigen adres.
 - Registratie verraadt of een gebruikersnaam al bestaat. Zonder tweede kanaal zoals e-mail is dat bij zelfgekozen gebruikersnamen niet te vermijden; de limiet maakt het opsporen alleen traag en het logt.

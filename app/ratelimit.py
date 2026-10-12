@@ -36,9 +36,14 @@ class Policy:
 # gebeurt, de accounts zelf blijven even streng beschermd.
 ACCOUNT_POLICIES = {
     # Per account vanaf één IP-adres: gericht raden op één account. Bewust
-    # de combinatie en niet het account alleen, zie "login_account". Een
-    # klasgenoot achter hetzelfde schoolnetwerk raakt dit niet: die heeft
-    # een eigen combinatie.
+    # de combinatie en niet het account alleen, zie "login_account".
+    #
+    # BEPERKING: wie vijf keer een verkeerd wachtwoord invoert voor jouw
+    # gebruikersnaam vanaf hetzelfde IP-adres als jij (school, NAT) maakt
+    # dezelfde combinatie en sluit je daar 15 tot 60 minuten buiten. Vanaf een
+    # ander netwerk kom je gewoon binnen. De IP-modus verandert dit niet, want
+    # dit is een accountlimiet. Een mogelijke oplossing voor later: een
+    # "bekend apparaat"-cookie na een geslaagde login.
     "login_pair": Policy(5, 900, 900, 3600),
 
     # Per account, over alle IP's heen, in de wachtwoordstap: NIET blokkerend.
